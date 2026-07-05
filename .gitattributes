@@ -1,0 +1,4 @@
+# Vendored/checked-out Windows-era sources (upstream-scpcb, blitz3d-ng/deps,
+# .dsp/.dsw project files) - leave line endings exactly as upstream has them,
+# don't let git normalize on checkout/checkin across platforms.
+* -text

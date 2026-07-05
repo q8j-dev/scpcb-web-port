@@ -1,0 +1,404 @@
+name: CI
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+env:
+  LLVM_VERSION: 19.1.5
+
+jobs:
+  windows:
+    name: Windows
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - windows-2019
+          - windows-2022
+        arch:
+          - win32
+          - win64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: seanmiddleditch/gha-setup-ninja@master
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+      - if: matrix.arch == 'win64'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/blitz3d-ng/build-llvm/releases/download/v$env:LLVM_VERSION/llvm-$env:LLVM_VERSION-win64-msvc$env:VisualStudioVersion.zip" -OutFile "llvm.zip"
+          Expand-Archive llvm.zip -DestinationPath .\
+      - run: .\make.bat release
+
+      # we're gonna upload this now so it's not contaminated with the mesa
+      # files
+      - name: Upload toolchain and package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.arch }}-${{ matrix.os }}
+          path: |
+            _release/bin
+            _release/*.exe
+
+      - name: Install dummy sound card
+        shell: pwsh
+        run: |
+          Start-Service audio*
+          Invoke-WebRequest https://github.com/duncanthrax/scream/releases/download/3.6/Scream3.6.zip -OutFile C:\Scream3.6.zip
+          7z x C:\Scream3.6.zip -oC:\Scream
+          $cert = (Get-AuthenticodeSignature C:\Scream\Install\driver\Scream.sys).SignerCertificate
+          $store = [System.Security.Cryptography.X509Certificates.X509Store]::new("TrustedPublisher", "LocalMachine")
+          $store.Open("ReadWrite")
+          $store.Add($cert)
+          $store.Close()
+          cd C:\Scream\Install\driver
+          C:\Scream\Install\helpers\devcon install Scream.inf *Scream
+
+      - name: Install mesa
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/pal1000/mesa-dist-win/releases/download/23.0.0/mesa3d-23.0.0-release-msvc.7z -OutFile mesa3d.7z
+          7z x mesa3d.7z -omesa
+          cp mesa\$env:platform\*.dll _release\bin\
+          ls _release\bin
+
+      - name: Test suite
+        shell: pwsh
+        run: |
+          $env:blitzpath='_release'
+          .\test\suite.bat
+
+  mingw:
+    name: MinGW
+    runs-on: ubuntu-20.04 # ubuntu-latest is missing some sound modules
+    strategy:
+      matrix:
+        arch:
+          - mingw32
+          - mingw64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: ./env.sh mingw make ENV=release PLATFORM=${{ matrix.arch }}
+      # - run: ./env.sh mingw sh ./test/entry.mingw32.sh
+      #   continue-on-error: true
+
+  macos:
+    name: macOS
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - macos-14
+          - macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: |
+          mkdir _release/toolchains
+          wget https://github.com/blitz3d-ng/build-llvm/releases/download/v$LLVM_VERSION/llvm-$LLVM_VERSION-${{ matrix.os }}.zip
+          unzip llvm-$LLVM_VERSION-${{ matrix.os }}.zip
+      - run: brew install ninja
+      - run: make ENV=release PLATFORM=macos LLVM_ROOT=$GITHUB_WORKSPACE/llvm
+      - run: blitzpath=$GITHUB_WORKSPACE/_release ./test/suite.sh
+      - name: Upload toolchain and package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}
+          path: |
+            _release/bin
+            _release/*.app
+
+  linux:
+    name: Linux
+    runs-on: ubuntu-20.04 # ubuntu-latest is missing some sound modules
+    strategy:
+      matrix:
+        dist:
+          - debian-10
+          - debian-11
+          - ubuntu-20.04
+          - ubuntu-22.04
+    steps:
+      - name: Install dummy sound card
+        run: |
+          sudo apt-get install -y linux-sound-base linux-modules-extra-`uname -r`
+          sudo modprobe snd-dummy
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: ./env.sh ${{ matrix.dist }} make ENV=release PLATFORM=linux
+      - run: ./env.sh ${{ matrix.dist }} ./test/suite.sh
+
+  ios:
+    name: iOS
+    runs-on: macos-14
+    strategy:
+      matrix:
+        device:
+          - ios
+          - ios-sim
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: |
+          mkdir _release/toolchains
+          wget https://github.com/blitz3d-ng/build-llvm/releases/download/v$LLVM_VERSION/llvm-$LLVM_VERSION-macos-14.zip
+          unzip llvm-$LLVM_VERSION-macos-14.zip
+      - run: brew install ninja
+      - run: make compiler
+      - run: make ENV=release PLATFORM=${{ matrix.device }}
+      - run: blitzpath=$GITHUB_WORKSPACE/_release ./test/suite.sh ${{ matrix.device }}
+      - name: Upload toolchain and package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.device }}
+          path: _release/bin
+
+  android:
+    name: Android
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        arch:
+          - arm64-v8a
+          - armeabi-v7a
+          - "x86"
+          - "x86_64"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: ./env.sh android make compiler
+      - run: ./env.sh android make ENV=release PLATFORM=android ARCH=${{ matrix.arch }}
+      - run: ./env.sh android ./test/suite.sh ${{ matrix.arch }}-android-31
+      - name: Upload toolchain and package
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ matrix.arch }}
+          path: _release/bin
+
+  ovr:
+    name: OVR
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: ./env.sh android make ovr
+      - run: ./env.sh android ./test/suite.sh ovr
+      - name: Upload toolchain and package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ovr-${{ matrix.arch }}
+          path: _release/bin
+
+  emscripten:
+    name: Emscripten (Web)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: ./env.sh emscripten make emscripten
+      - run: ./env.sh emscripten ./test/suite.sh emscripten
+
+  nx:
+    name: Switch
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: ./env.sh nx make compiler
+      - run: ./env.sh nx make ENV=release PLATFORM=nx
+      - run: ./env.sh nx ./test/suite.sh nx
+
+  help:
+    name: Help
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ruby/setup-ruby@v1
+        with:
+          working-directory: src/help
+          bundler-cache: true
+          rubygems: latest
+      - run: make help
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: help
+          path: _release/help
+
+  package_windows:
+    name: Build Windows Package
+    runs-on: ubuntu-24.04
+    needs:
+      - windows
+      - help
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get tag name
+        run: |
+          export GITHUB_TAG=$([ $GITHUB_REF_NAME = "master" ] && echo "edge" || (echo $GITHUB_REF_NAME | tr / -))
+          echo "GITHUB_TAG=$GITHUB_TAG" >> $GITHUB_ENV
+
+      - run: rm -rf _release/help
+      - name: Download help
+        uses: actions/download-artifact@v4
+        with:
+          name: help
+          path: _release/help
+
+      - name: Download win32
+        uses: actions/download-artifact@v4
+        with:
+          name: win32-windows-2022
+          path: _release
+
+      - name: Download win64
+        uses: actions/download-artifact@v4
+        with:
+          name: win64-windows-2022
+          path: _release
+
+      - name: Create Windows package
+        run: |
+          make dist-pkg
+          mv package.zip blitz3d-ng-${{ env.GITHUB_TAG }}-windows.zip
+          git clean -xfd _release
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: "*.zip"
+
+  package_macos:
+    name: Build macOS Package
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        version:
+          - 14
+          - 15
+    needs:
+      - macos
+      - ios
+      - help
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get tag name
+        run: |
+          export GITHUB_TAG=$([ $GITHUB_REF_NAME = "master" ] && echo "edge" || (echo $GITHUB_REF_NAME | tr / -))
+          echo "GITHUB_TAG=$GITHUB_TAG" >> $GITHUB_ENV
+
+      - run: rm -rf _release/help
+      - name: Download help
+        uses: actions/download-artifact@v4
+        with:
+          name: help
+          path: _release/help
+
+      - name: Download macos-${{ matrix.version }}
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-${{ matrix.version }}
+          path: _release
+
+      - name: Download ios
+        uses: actions/download-artifact@v4
+        with:
+          name: ios
+          path: _release
+
+      - name: Download ios-sim
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-sim
+          path: _release
+
+      - name: Create package
+        run: |
+          make dist-pkg
+          mv package.zip blitz3d-ng-${{ env.GITHUB_TAG }}-macos${{ matrix.version }}.zip
+          git clean -xfd _release
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.version }}-package
+          path: "*.zip"
+
+  release:
+    name: Build release
+    runs-on: ubuntu-24.04
+    needs:
+      - help
+      - package_windows
+      - package_macos
+      - linux
+      - android
+      - ovr
+      - emscripten
+      - nx
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get tag name
+        run: |
+          export GITHUB_TAG=$([ $GITHUB_REF_NAME = "master" ] && echo "edge" || (echo $GITHUB_REF_NAME | tr / -))
+          echo "GITHUB_TAG=$GITHUB_TAG" >> $GITHUB_ENV
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-package
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-14-package
+      - run: TAG=$GITHUB_TAG MACOS=macos14 file=\$file ARCHIVE=\$ARCHIVE envsubst < src/download.macos.sh > blitz3d-ng-$GITHUB_TAG-macos14.sh
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-15-package
+      - run: TAG=$GITHUB_TAG MACOS=macos15 file=\$file ARCHIVE=\$ARCHIVE envsubst < src/download.macos.sh > blitz3d-ng-$GITHUB_TAG-macos15.sh
+
+      - name: Versioned Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          prerelease: ${{ contains(github.ref, 'beta') }}
+          generate_release_notes: false
+          files: |
+            *.zip
+            *.sh
+
+      - name: Edge Release
+        if: github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Latest Build
+          tag_name: edge
+          prerelease: true
+          generate_release_notes: false
+          body: |
+            This is the latest code based on the master branch. It should generally
+            work, but has not been manually tested. Use with caution.
+          files: |
+            *.zip
+            *.sh

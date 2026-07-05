@@ -1,0 +1,106 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  webgame:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: brew install cmake ninja
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v16
+        with:
+          version: "6.0.2"
+
+      - name: Cache blitz3d-ng dependency sources
+        uses: actions/cache@v4
+        with:
+          path: blitz3d-ng/deps
+          key: deps-${{ hashFiles('tools/fetch_blitz3d_ng_deps.py') }}
+
+      - name: Restore blitz3d-ng dependencies
+        run: python3 tools/fetch_blitz3d_ng_deps.py
+
+      - name: Cache prebuilt LLVM
+        uses: actions/cache@v4
+        id: llvm-cache
+        with:
+          path: blitz3d-ng/llvm
+          key: llvm-19.1.5-macos-14
+
+      - name: Fetch prebuilt LLVM
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fL -o llvm.zip https://github.com/blitz3d-ng/build-llvm/releases/download/v19.1.5/llvm-19.1.5-macos-14.zip
+          unzip -q llvm.zip -d blitz3d-ng
+          rm llvm.zip
+
+      - name: Cache blitzcc build
+        uses: actions/cache@v4
+        with:
+          path: |
+            blitz3d-ng/build/arm64-macos-release
+            blitz3d-ng/_release
+          key: blitzcc-${{ hashFiles('blitz3d-ng/src/**') }}
+          restore-keys: blitzcc-
+
+      - name: Build blitzcc
+        working-directory: blitz3d-ng
+        run: make host PROJECT_TO_BUILD=blitzcc ENV=release CMAKE_OPTIONS=-DCMAKE_POLICY_VERSION_MINIMUM=3.5
+
+      - name: Build WebGPU runtime libraries
+        # Not cached like blitzcc above: the compiled objects embed an absolute
+        # path to Emscripten's install dir, which setup-emsdk puts in a fresh
+        # random temp directory every run - a cache hit here would restore a
+        # CMakeCache.txt pointing at a path that no longer exists.
+        run: |
+          mkdir -p blitz3d-ng/build/webgpu-emscripten-release
+          cd blitz3d-ng/build/webgpu-emscripten-release
+          emcmake cmake -G Ninja -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DOUTPUT_PATH=_release_webgpu -DBB_PLATFORM=emscripten -DBB_ENV=release -DBB_WEBGPU=ON -DARCH=webgpu ../..
+          ninja
+
+      - name: Package game assets
+        run: python3 tools/pack_monolith.py
+
+      - name: Link the game
+        run: python3 build_game_webgpu.py
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: webgame
+          path: webgame/
+          if-no-files-found: error
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: webgame/
+
+  deploy:
+    needs: webgame
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
