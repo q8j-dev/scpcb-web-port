@@ -96,7 +96,7 @@ jobs:
           path: webgame/
           if-no-files-found: error
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: webgame/
 
