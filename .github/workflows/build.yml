@@ -33,7 +33,7 @@ jobs:
           version: "6.0.2"
 
       - name: Cache blitz3d-ng dependency sources
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: blitz3d-ng/deps
           key: deps-${{ hashFiles('tools/fetch_blitz3d_ng_deps.py') }}
@@ -42,7 +42,7 @@ jobs:
         run: python3 tools/fetch_blitz3d_ng_deps.py
 
       - name: Cache prebuilt LLVM
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         id: llvm-cache
         with:
           path: blitz3d-ng/llvm
@@ -56,7 +56,7 @@ jobs:
           rm llvm.zip
 
       - name: Cache blitzcc build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             blitz3d-ng/build/arm64-macos-release
