@@ -21,10 +21,12 @@ python3 build.py
 
 The first Linux build compiles LLVM from source, which takes an hour or more. macOS on Apple Silicon and Windows download a prebuilt LLVM.
 
+The game is built twice. The `jspi` build uses JavaScript Promise Integration and native WebAssembly exceptions, which need Chrome or Edge 137 or later and give a smaller, faster game. The `compat` build uses Asyncify and works in every browser with WebGPU. The page picks `jspi` when the browser supports it. Add `?variant=compat` to the address to force the other one. `python3 build.py --variant jspi` builds only one of them.
+
 ## Running
 
 ```
 python3 build.py --serve
 ```
 
-Then open http://127.0.0.1:8090/ in a browser that supports WebGPU. Chrome and Edge work best. Alt+Enter toggles fullscreen.
+Then open http://127.0.0.1:8090/ in a browser that supports WebGPU. Chrome and Edge work best. Alt+Enter toggles fullscreen. The 300 MB of game data is stored in the browser after the first load, so later visits skip the download.

@@ -1,7 +1,7 @@
 webgame/
 blitz3d-ng/build/
 blitz3d-ng/_release/bin/
-blitz3d-ng/_release_webgpu/
+blitz3d-ng/_release_webgpu*/
 blitz3d-ng/deps/*/tree/
 blitz3d-ng/deps/crossguid/src/
 blitz3d-ng/deps/freeimage/src/

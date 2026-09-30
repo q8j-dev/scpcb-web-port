@@ -264,6 +264,83 @@
     loading.appendChild(m);
   }
 
+  const ASSET_CACHE = 'scpcb-assets';
+
+  const jspiSupported = typeof WebAssembly.Suspending === 'function' &&
+                        typeof WebAssembly.promising === 'function';
+
+  function pickVariant(available) {
+    const wanted = new URLSearchParams(location.search).get('variant');
+    if (wanted && available.includes(wanted)) return wanted;
+    if (jspiSupported && available.includes('jspi')) return 'jspi';
+    if (available.includes('compat')) return 'compat';
+    return null;
+  }
+
+  async function openAssetCache() {
+    try {
+      return typeof caches === 'undefined' ? null : await caches.open(ASSET_CACHE);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function fetchPart(cache, part, writes) {
+    const url = part.name + '?v=' + part.hash;
+    if (cache) {
+      const hit = await cache.match(url);
+      if (hit) {
+        const cached = new Uint8Array(await hit.arrayBuffer());
+        if (cached.length === part.size) return cached;
+        await cache.delete(url);
+      }
+    }
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(part.name + ': HTTP ' + r.status);
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    if (bytes.length !== part.size) throw new Error(part.name + ' has the wrong size');
+    if (cache) {
+      writes.push(cache.put(url, new Response(bytes)).catch((e) => console.warn('could not cache ' + part.name, e)));
+    }
+    return bytes;
+  }
+
+  async function loadAssets(manifest) {
+    const cache = await openAssetCache();
+    const buf = new Uint8Array(manifest.size);
+    const offsets = [];
+    let end = 0;
+    for (const part of manifest.parts) {
+      offsets.push(end);
+      end += part.size;
+    }
+    if (end !== manifest.size) throw new Error('assets.manifest.json is inconsistent');
+
+    const writes = [];
+    let loaded = 0, next = 0;
+    const worker = async () => {
+      while (next < manifest.parts.length) {
+        const i = next++;
+        const bytes = await fetchPart(cache, manifest.parts[i], writes);
+        buf.set(bytes, offsets[i]);
+        loaded += bytes.length;
+        const pct = Math.floor((loaded / manifest.size) * 100);
+        barfill.style.width = pct + '%';
+        pctEl.textContent = pct + '%';
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, manifest.parts.length) }, worker));
+
+    if (cache) {
+      const wanted = new Set(manifest.parts.map((p) => new URL(p.name + '?v=' + p.hash, location.href).href));
+      Promise.all(writes)
+        .then(() => cache.keys())
+        .then((keys) => Promise.all(keys.filter((k) => !wanted.has(k.url)).map((k) => cache.delete(k))))
+        .catch(() => {});
+    }
+    return buf;
+  }
+
   (async () => {
     if (!navigator.gpu) {
       fail('This game requires WebGPU. Use Chrome or Edge 113+, or Safari 26+, over HTTPS or localhost.');
@@ -277,33 +354,26 @@
     }
     Module.onAbort = (w) => fail('Startup failed: ' + w);
 
+    let manifest;
     try {
       const mf = await fetch('assets.manifest.json', { cache: 'no-cache' });
-      if (mf.ok) {
-        const manifest = await mf.json();
-        const total = manifest.size;
-        const buf = new Uint8Array(total);
-        let loaded = 0, next = 0;
-        const worker = async () => {
-          while (next < manifest.parts.length) {
-            const i = next++;
-            const r = await fetch(manifest.parts[i], { cache: 'no-cache' });
-            if (!r.ok) throw new Error('chunk ' + manifest.parts[i] + ' failed');
-            const chunk = new Uint8Array(await r.arrayBuffer());
-            const offset = i * manifest.chunkSize;
-            if (offset + chunk.length > total) {
-              throw new Error('asset package mismatch (stale cache?), please hard-refresh (Cmd/Ctrl+Shift+R)');
-            }
-            buf.set(chunk, offset);
-            loaded += chunk.length;
-            const pct = Math.floor((loaded / total) * 100);
-            barfill.style.width = pct + '%';
-            pctEl.textContent = pct + '%';
-          }
-        };
-        await Promise.all(Array.from({ length: Math.min(4, manifest.parts.length) }, worker));
-        Module.getPreloadedPackage = () => buf.buffer;
-      }
+      if (!mf.ok) throw new Error('assets.manifest.json: HTTP ' + mf.status);
+      manifest = await mf.json();
+    } catch (e) {
+      fail('Failed to load game assets: ' + e.message);
+      return;
+    }
+
+    const variant = pickVariant(manifest.variants);
+    if (!variant) {
+      fail('This build needs a newer browser. Use Chrome or Edge 137 or later.');
+      return;
+    }
+    console.log('using the ' + variant + ' build');
+
+    try {
+      const buf = await loadAssets(manifest);
+      Module.getPreloadedPackage = () => buf.buffer;
     } catch (e) {
       fail('Failed to load game assets: ' + e.message);
       return;
@@ -311,9 +381,10 @@
 
     await loadPersisted();
 
+    Module.locateFile = (path, dir) => dir + path + '?v=' + manifest.version;
     const s = document.createElement('script');
     s.async = true;
-    s.src = 'scpcb.js';
+    s.src = variant + '/scpcb.js?v=' + manifest.version;
     document.body.appendChild(s);
   })();
 </script>

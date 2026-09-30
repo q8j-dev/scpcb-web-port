@@ -2,6 +2,7 @@
 import argparse
 import configparser
 import glob
+import hashlib
 import json
 import os
 import platform
@@ -46,7 +47,23 @@ os.environ["PATH"] = os.path.dirname(sys.executable) + os.pathsep + os.environ.g
 os.environ.setdefault("EMSDK_PYTHON", sys.executable)
 
 NATIVE_BUILD = os.path.join(NG, "build", f"{ARCH}-{BB_PLATFORM}-release")
-WASM_BUILD = os.path.join(NG, "build", "webgpu-emscripten-release")
+VARIANTS = {
+    "jspi": {
+        "build": "webgpu-emscripten-jspi-release",
+        "out": "_release_webgpu_jspi",
+        "cmake": ["-DBB_JSPI=ON"],
+        "eh": "-fwasm-exceptions",
+        "env": {"SCPCB_JSPI": "1"},
+    },
+    "compat": {
+        "build": "webgpu-emscripten-release",
+        "out": "_release_webgpu",
+        "cmake": [],
+        "eh": "-fexceptions",
+        "env": {},
+    },
+}
+SELECTED = list(VARIANTS)
 BLITZCC = os.path.join(NG, "_release", "bin", "blitzcc" + EXE)
 
 
@@ -243,17 +260,21 @@ def emscripten_tools():
 
 
 def step_runtime():
-    log("WebGPU runtime libraries (wasm)")
     load_msvc_env()
     emcmake = emscripten_tools()[0]
     need("cmake", "Install CMake.")
     need("ninja", "Install Ninja.")
-    os.makedirs(WASM_BUILD, exist_ok=True)
-    run([emcmake, "cmake", "-G", "Ninja", CMAKE_COMPAT,
-         "-DOUTPUT_PATH=_release_webgpu", "-DBB_PLATFORM=emscripten",
-         "-DBB_ENV=release", "-DBB_WEBGPU=ON", "-DARCH=webgpu", NG],
-        cwd=WASM_BUILD)
-    run(["cmake", "--build", WASM_BUILD, "-j", jobs()])
+    for name in SELECTED:
+        variant = VARIANTS[name]
+        log(f"WebGPU runtime libraries (wasm, {name})")
+        build_dir = os.path.join(NG, "build", variant["build"])
+        os.makedirs(build_dir, exist_ok=True)
+        run([emcmake, "cmake", "-G", "Ninja", CMAKE_COMPAT,
+             f"-DOUTPUT_PATH={variant['out']}", "-DBB_PLATFORM=emscripten",
+             "-DBB_ENV=release", "-DBB_WEBGPU=ON", "-DARCH=webgpu",
+             *variant["cmake"], NG],
+            cwd=build_dir)
+        run(["cmake", "--build", build_dir, "-j", jobs()])
 
 
 GAME_DIR = os.path.join(ROOT, "upstream-scpcb")
@@ -328,6 +349,50 @@ def step_pack():
     shutil.rmtree(stage)
 
 
+def file_digest(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def link_variant(name, emcc, assets_js):
+    variant = VARIANTS[name]
+    work = os.path.join(WORK_DIR, name)
+    os.makedirs(work, exist_ok=True)
+
+    compat_obj = os.path.join(work, "web_compat.o")
+    run([emcc, os.path.join(WEBGPU_SRC, "web_compat.cpp"),
+         "-c", "-O2", "-std=c++17", variant["eh"],
+         "-I", os.path.join(NG, "src", "modules"),
+         "-I", os.path.join(NG, "src", "modules", "bb", "pixmap"),
+         "-I", os.path.join(NG, "src"),
+         "-I", WEBGPU_SRC,
+         "-o", compat_obj])
+
+    debug = os.environ.get("SCPCB_DEBUG", "0") == "1"
+    perf_flags = "-O2 -sASSERTIONS=1 --profiling-funcs" if debug else \
+        "-O3 -sASSERTIONS=0 -sGL_TRACK_ERRORS=0 -sINITIAL_MEMORY=536870912"
+
+    out_dir = os.path.join(NG, variant["out"])
+    env = os.environ.copy()
+    env.pop("SCPCB_JSPI", None)
+    env.update(variant["env"])
+    env["LLVM_ROOT"] = os.path.join(NG, "llvm")
+    env["blitzpath"] = out_dir
+    env["SCPCB_WEBGPU"] = "1"
+    env["SCPCB_LIB_DIR"] = os.path.join(out_dir, "bin", "wasm32-unknown-emscripten", "lib")
+    env["SCPCB_COMPAT_OBJ"] = compat_obj
+    env["SCPCB_EMCC_EXTRA"] = (
+        f"--pre-js {assets_js} -sSTACK_SIZE=16777216 "
+        f"-sDEFAULT_TO_CXX -sGROWABLE_ARRAYBUFFERS=0 {perf_flags}")
+
+    out = os.path.join(work, "scpcb")
+    run([BLITZCC, "-target", "emscripten", "-o", out, "Main.bb"], cwd=GAME_DIR, env=env)
+    return out
+
+
 def step_game():
     log("compiling and linking the game")
     emcc = emscripten_tools()[1]
@@ -337,16 +402,6 @@ def step_game():
     assets_data = os.path.join(STAGE_DIR, "assets.data")
     if not os.path.isfile(assets_js) or not os.path.isfile(assets_data):
         sys.exit("error: packaged assets missing, run: python3 build.py pack")
-    os.makedirs(WORK_DIR, exist_ok=True)
-
-    compat_obj = os.path.join(WORK_DIR, "web_compat.o")
-    run([emcc, os.path.join(WEBGPU_SRC, "web_compat.cpp"),
-         "-c", "-O2", "-std=c++17", "-fexceptions",
-         "-I", os.path.join(NG, "src", "modules"),
-         "-I", os.path.join(NG, "src", "modules", "bb", "pixmap"),
-         "-I", os.path.join(NG, "src"),
-         "-I", WEBGPU_SRC,
-         "-o", compat_obj])
 
     main_bb = os.path.join(GAME_DIR, "Main.bb")
     with open(main_bb, "r", encoding="utf-8", errors="surrogateescape") as f:
@@ -355,30 +410,20 @@ def step_game():
         with open(main_bb, "w", encoding="utf-8", errors="surrogateescape") as f:
             f.write('Include "WebShims.bb"\n' + body)
 
-    debug = os.environ.get("SCPCB_DEBUG", "0") == "1"
-    perf_flags = "-O2 -sASSERTIONS=1" if debug else \
-        "-O3 -sASSERTIONS=0 -sGL_TRACK_ERRORS=0 -sINITIAL_MEMORY=536870912"
-    env = os.environ.copy()
-    env["LLVM_ROOT"] = os.path.join(NG, "llvm")
-    env["blitzpath"] = os.path.join(NG, "_release_webgpu")
-    env["SCPCB_WEBGPU"] = "1"
-    env["SCPCB_LIB_DIR"] = os.path.join(
-        NG, "_release_webgpu", "bin", "wasm32-unknown-emscripten", "lib")
-    env["SCPCB_COMPAT_OBJ"] = compat_obj
-    env["SCPCB_EMCC_EXTRA"] = (
-        f"--pre-js {assets_js} -sSTACK_SIZE=16777216 -sASYNCIFY_STACK_SIZE=1048576 "
-        f"-sDEFAULT_TO_CXX -sGROWABLE_ARRAYBUFFERS=0 --profiling-funcs {perf_flags}")
-
-    out = os.path.join(WORK_DIR, "scpcb")
-    run([BLITZCC, "-target", "emscripten", "-o", out, "Main.bb"], cwd=GAME_DIR, env=env)
-
     deploy = os.path.join(ROOT, "webgame")
     os.makedirs(deploy, exist_ok=True)
     for old in os.listdir(deploy):
         if old in ("scpcb.js", "scpcb.wasm", "assets.manifest.json") or old.startswith("assets.data"):
             os.remove(os.path.join(deploy, old))
-    shutil.copy(out + ".js", deploy)
-    shutil.copy(out + ".wasm", deploy)
+
+    for name in SELECTED:
+        log(f"linking the {name} build")
+        out = link_variant(name, emcc, assets_js)
+        variant_dir = os.path.join(deploy, name)
+        os.makedirs(variant_dir, exist_ok=True)
+        shutil.copy(out + ".js", variant_dir)
+        shutil.copy(out + ".wasm", variant_dir)
+
     shutil.copy(os.path.join(ROOT, "web-shell", "index.html"), os.path.join(deploy, "index.html"))
 
     chunk_size = 24 * 1024 * 1024
@@ -391,19 +436,35 @@ def step_game():
             name = f"assets.data.{len(parts):03d}"
             with open(os.path.join(deploy, name), "wb") as f:
                 f.write(chunk)
-            parts.append(name)
+            parts.append({"name": name, "size": len(chunk),
+                          "hash": hashlib.sha256(chunk).hexdigest()[:16]})
+
+    variants = [n for n in VARIANTS if os.path.isfile(os.path.join(deploy, n, "scpcb.wasm"))]
+    version = hashlib.sha256()
+    for part in parts:
+        version.update(part["hash"].encode())
+    for name in variants:
+        for ext in ("js", "wasm"):
+            version.update(file_digest(os.path.join(deploy, name, f"scpcb.{ext}")).encode())
+
     with open(os.path.join(deploy, "assets.manifest.json"), "w") as f:
-        json.dump({"size": os.path.getsize(assets_data), "chunkSize": chunk_size, "parts": parts}, f)
+        json.dump({"version": version.hexdigest()[:16], "variants": variants,
+                   "size": os.path.getsize(assets_data), "chunkSize": chunk_size,
+                   "parts": parts}, f)
 
 
 def main():
     ap = argparse.ArgumentParser(description="Build SCP: Containment Breach (Web).")
     ap.add_argument("steps", nargs="*", choices=STEPS,
                     metavar="step", help=f"any of: {', '.join(STEPS)} (default: all)")
+    ap.add_argument("--variant", choices=["all", *VARIANTS], default="all",
+                    help="build only one of the wasm builds (default: all)")
     ap.add_argument("--serve", action="store_true",
                     help="serve webgame/ on http://127.0.0.1:8090 when done")
     args = ap.parse_args()
 
+    if args.variant != "all":
+        SELECTED[:] = [args.variant]
     steps = args.steps or STEPS
     print(f"platform: {SYSTEM} {ARCH}")
     for name in STEPS:
