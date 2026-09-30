@@ -1,10 +1,8 @@
 # SCP: Containment Breach - Web Port
 
-[![build](https://github.com/q8j-dev/scpcb-web-port/actions/workflows/build.yml/badge.svg)](https://github.com/q8j-dev/scpcb-web-port/actions/workflows/build.yml)
-
 Running SCP: Containment Breach in the browser. No native install, WebAssembly + WebGPU.
 
-Play it live: **https://q8j-dev.github.io/scpcb-web-port/** (rebuilt and redeployed automatically on every push to `main`, see [`.github/workflows/build.yml`](.github/workflows/build.yml)).
+Play it live: **https://q8j-dev.github.io/scpcb-web-port/**.
 
 The game is written in Blitz3D BASIC, an old Windows-only game-dev language from the early 2000s. Instead of reimplementing the game logic, this compiles the actual unmodified `.bb` source through [blitz3d-ng](https://github.com/blitz3d-ng/blitz3d-ng), a cross-platform LLVM-backed reimplementation of the Blitz3D compiler and runtime that targets emscripten. That project is what makes this possible at all. Without it there's no way to run Blitz3D code outside a 32-bit Windows binary.
 
@@ -61,8 +59,6 @@ python build_game_webgpu.py
 **Linux:** there's no prebuilt LLVM archive for Linux, so `blitzcc` has to be built from source there (`cd blitz3d-ng && make llvm` before `make host PROJECT_TO_BUILD=blitzcc ENV=release CMAKE_OPTIONS=-DCMAKE_POLICY_VERSION_MINIMUM=3.5`, which needs a full C++ toolchain plus, on Ubuntu: `git autoconf libtool gettext autopoint gperf cmake clang libxml2-dev zlib1g-dev libwxgtk3.0-gtk3-dev libxrandr-dev libxinerama-dev libxcursor-dev uuid-dev libfontconfig1-dev`). Slow the first time, same steps otherwise as macOS from `emcmake cmake` onward.
 
 `pack_monolith.py`, `build_game_webgpu.py` and `fetch_blitz3d_ng_deps.py` are plain Python, same commands on every platform. No bash, no WSL, no Git Bash required.
-
-There's also a GitHub Actions workflow (`.github/workflows/build.yml`) that does all of this from a clean checkout and uploads `webgame/` as a build artifact. It runs on macOS runners since that's the platform with a prebuilt LLVM available.
 
 ### Running it
 
