@@ -106,19 +106,19 @@ public:
 			bbgpu_movie_play( handle );
 		}
 
-		std::vector<unsigned char> buf( (size_t)vid_w*vid_h*4 );
-		if( bbgpu_movie_grab( handle,buf.data(),vid_w,vid_h ) ){
-			BBPixmap *pm=d_new BBPixmap;
-			pm->format=PF_RGBA;
-			pm->width=vid_w;pm->height=vid_h;pm->depth=32;pm->bpp=4;pm->pitch=vid_w*4;
-			pm->trans=false;
-			pm->bits=new unsigned char[ (size_t)vid_w*vid_h*4 ];
-			memcpy( pm->bits,buf.data(),buf.size() );
+		BBPixmap *pm=d_new BBPixmap;
+		pm->format=PF_RGBA;
+		pm->width=vid_w;pm->height=vid_h;pm->depth=32;pm->bpp=4;pm->pitch=vid_w*4;
+		pm->trans=false;
+		pm->bits=new unsigned char[ (size_t)vid_w*vid_h*4 ];
+		if( bbgpu_movie_grab( handle,pm->bits,vid_w,vid_h ) ){
 			frame_canvas->setPixmap( pm );
 
 			if( w<0 ) w=vid_w;
 			if( h<0 ) h=vid_h;
 			((WebGPUCanvas*)dest)->blitScaled( x,y,w,h,frame_canvas,0,0,vid_w,vid_h,true );
+		}else{
+			delete pm;
 		}
 
 		return bbgpu_movie_ended( handle )==0;

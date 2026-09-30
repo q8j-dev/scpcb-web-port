@@ -122,24 +122,25 @@ void WebGPUCanvas::uploadData(){
 	if( pixels ){
 		data=pixels;
 	}else if( pixmap && pixmap->bits ){
-		pm=d_new BBPixmap;
-		pm->format=pixmap->format;
-		pm->width=pixmap->width;
-		pm->height=pixmap->height;
-		pm->depth=pixmap->depth;
-		pm->pitch=pixmap->pitch;
-		pm->bpp=pixmap->bpp;
-		pm->trans=pixmap->trans;
-
-		int size=pm->width*pm->bpp*pm->height;
-		pm->bits=new unsigned char[size];
-		memcpy( pm->bits,pixmap->bits,size );
-
 		if( flags&CANVAS_TEX_MASK ){
-			pm->mask( (mask>>16)&255,(mask>>8)&255,mask&255 );
-		}
+			pm=d_new BBPixmap;
+			pm->format=pixmap->format;
+			pm->width=pixmap->width;
+			pm->height=pixmap->height;
+			pm->depth=pixmap->depth;
+			pm->pitch=pixmap->pitch;
+			pm->bpp=pixmap->bpp;
+			pm->trans=pixmap->trans;
 
-		data=pm->bits;
+			size_t size=(size_t)pm->width*pm->bpp*pm->height;
+			pm->bits=new unsigned char[size];
+			memcpy( pm->bits,pixmap->bits,size );
+			pm->mask( (mask>>16)&255,(mask>>8)&255,mask&255 );
+
+			data=pm->bits;
+		}else{
+			data=pixmap->bits;
+		}
 	}
 
 	dirty=false;
