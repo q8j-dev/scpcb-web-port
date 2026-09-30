@@ -299,7 +299,7 @@ Function UpdateMainMenu()
 				
 				y = y + height + 10 * MenuScale
 				width = 580 * MenuScale
-				height = 330 * MenuScale
+				height = 380 * MenuScale
 				
 				DrawFrame(x, y, width, height)				
 				
@@ -652,7 +652,7 @@ Function UpdateMainMenu()
 				
 				If MainMenuTab = 3 ;Graphics
 					;[Block]
-					height = 380 * MenuScale
+					height = 330 * MenuScale
 					DrawFrame(x, y, width, height)
 					
 					y=y+20*MenuScale
@@ -706,15 +706,6 @@ Function UpdateMainMenu()
 					EndIf
 					
 					y=y+50*MenuScale
-					
-					Color 255,255,255
-					Text(x + 20 * MenuScale, y, I_Loc\OptionName_Vram)
-					EnableVRam = DrawTick(x + 310 * MenuScale, y + MenuScale, False, True)
-					If MouseOn(x+310*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale) And OnSliderID=0
-						DrawOptionsTooltip(tx,ty,tw,th,"vram")
-					EndIf
-
-					y=y+50*MenuScale
 
 					HUDOffsetScale = SlideBar(x + 310*MenuScale, y+6*MenuScale,150*MenuScale, HUDOffsetScale*100, 5)/100
 					Color 255,255,255
@@ -748,7 +739,7 @@ Function UpdateMainMenu()
 					;[End Block]
 				ElseIf MainMenuTab = 5 ;Audio
 					;[Block]
-					height = 290 * MenuScale
+					height = 240 * MenuScale
 					If HasDubbedAudio Then height = height + 50*MenuScale
 					DrawFrame(x, y, width, height)
 					
@@ -814,62 +805,6 @@ Function UpdateMainMenu()
 						DrawOptionsTooltip(tx,ty,tw,th+220*MenuScale,"closedcaptions")
 					EndIf
 
-					If ClosedCaptionsEnabled Then SubtitlesEnabled = True
-
-					y = y + 50*MenuScale
-					
-					Color 255,255,255
-					Text x + 20 * MenuScale, y, I_Loc\OptionName_Usertrack
-					EnableUserTracks = DrawTick(x + 310 * MenuScale, y + MenuScale, False, True)
-					If MouseOn(x+310*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale) And OnSliderID=0
-						DrawOptionsTooltip(tx,ty,tw,th,"usertrack")
-					EndIf
-					
-					If EnableUserTracks
-						y = y + 30 * MenuScale
-						Color 255,255,255
-						Text x + 20 * MenuScale, y, I_Loc\OptionName_Usertrackmode
-						UserTrackMode = DrawTick(x + 310 * MenuScale, y + MenuScale, UserTrackMode)
-						If UserTrackMode
-							Text x + 350 * MenuScale, y + MenuScale, I_Loc\OptionName_UsertrackmodeRepeat
-						Else
-							Text x + 350 * MenuScale, y + MenuScale, I_Loc\OptionName_UsertrackmodeRandom
-						EndIf
-						If MouseOn(x+310*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale) And OnSliderID=0
-							DrawOptionsTooltip(tx,ty,tw,th,"usertrackmode")
-						EndIf
-						If DrawButton(x + 20 * MenuScale, y + 30 * MenuScale, 250 * MenuScale, 25 * MenuScale, I_Loc\OptionName_Usertrackscan,False)
-							DebugLog "User Tracks Check Started"
-							
-							UserTrackCheck% = 0
-							UserTrackCheck2% = 0
-							
-							Dir=ReadDir("SFX\Radio\UserTracks\")
-							Repeat
-								file$=NextFile(Dir)
-								If file$="" Then Exit
-								If FileType("SFX\Radio\UserTracks\"+file$) = 1 Then
-									UserTrackCheck = UserTrackCheck + 1
-									test = LoadSound("SFX\Radio\UserTracks\"+file$)
-									If test<>0
-										UserTrackCheck2 = UserTrackCheck2 + 1
-									EndIf
-									FreeSound test
-								EndIf
-							Forever
-							CloseDir Dir
-							
-							DebugLog "User Tracks Check Ended"
-						EndIf
-						If MouseOn(x+20*MenuScale,y+30*MenuScale,190*MenuScale,25*MenuScale) And OnSliderID=0
-							DrawOptionsTooltip(tx,ty,tw,th,"usertrackscan")
-						EndIf
-						If UserTrackCheck%>0
-							Text x + 20 * MenuScale, y + 100 * MenuScale, Format3(I_Loc\OptionName_UsertrackscanFound, UserTrackCheck2, UserTrackCheck)
-						EndIf
-					Else
-						UserTrackCheck%=0
-					EndIf
 					;[End Block]
 				ElseIf MainMenuTab = 6 ;Controls
 					;[Block]
@@ -966,8 +901,9 @@ Function UpdateMainMenu()
 					;[End Block]
 				ElseIf MainMenuTab = 7 ;Advanced
 					;[Block]
-					height = (325 + (CurrFrameLimit > 0.0) * 30) * MenuScale
-					DrawFrame(x, y, width, height)	
+					height = 275 * MenuScale
+					If CurrFrameLimit > 0.0 Then height = height + 30 * MenuScale
+					DrawFrame(x, y, width, height)
 					
 					y = y + 20*MenuScale
 					
@@ -1014,15 +950,6 @@ Function UpdateMainMenu()
 						DrawOptionsTooltip(tx,ty,tw,th,"achpopup")
 					EndIf
 
-					y = y + 50*MenuScale
-
-					Color 255,255,255
-					Text(x + 20 * MenuScale, y, I_Loc\OptionName_Launcher)
-					LauncherEnabled% = DrawTick(x + 310 * MenuScale, y + MenuScale, False, True)
-					If MouseOn(x+310*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale) And OnSliderID=0
-						DrawOptionsTooltip(tx,ty,tw,th,"launcher")
-					EndIf
-					
 					y = y + 50*MenuScale
 					
 					Color 255,255,255

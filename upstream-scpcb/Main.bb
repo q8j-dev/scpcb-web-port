@@ -7810,14 +7810,6 @@ Function DrawMenu()
 					EndIf
 					
 					y=y+50*MenuScale
-					Color 100,100,100
-					Text(x, y, I_Loc\OptionName_Vram)	
-					EnableVRam = DrawTick(x + 270 * MenuScale, y + MenuScale, False, True)
-					If MouseOn(x + 270 * MenuScale, y + MenuScale, 20*MenuScale,20*MenuScale) And OnSliderID=0
-						DrawOptionsTooltip(tx,ty,tw,th,"vram")
-					EndIf
-
-					y=y+50*MenuScale
 
 					HUDOffsetScale = SlideBar(x + 270*MenuScale, y+6*MenuScale,100*MenuScale, HUDOffsetScale*100, 5)/100
 					Color 255,255,255
@@ -7911,34 +7903,6 @@ Function DrawMenu()
 					EndIf
 
 					If ClosedCaptionsEnabled Then SubtitlesEnabled = True
-					
-					y = y + 50*MenuScale
-					
-					Color 100,100,100
-					Text x, y, I_Loc\OptionName_Usertrack
-					EnableUserTracks = DrawTick(x + 270 * MenuScale, y + MenuScale, False, True)
-					If MouseOn(x+270*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale) And OnSliderID=0
-						DrawOptionsTooltip(tx,ty,tw,th,"usertrack")
-					EndIf
-					
-					If EnableUserTracks
-						y = y + 30 * MenuScale
-						Color 255,255,255
-						Text x, y, I_Loc\OptionName_Usertrackmode
-						UserTrackMode = DrawTick(x + 270 * MenuScale, y + MenuScale, UserTrackMode)
-						If UserTrackMode
-							Text x, y + 20 * MenuScale, I_Loc\OptionName_UsertrackmodeRepeat
-						Else
-							Text x, y + 20 * MenuScale, I_Loc\OptionName_UsertrackmodeRandom
-						EndIf
-						If MouseOn(x+270*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale) And OnSliderID=0
-							DrawOptionsTooltip(tx,ty,tw,th,"usertrackmode")
-						EndIf
-						;DrawButton(x, y + 30 * MenuScale, 190 * MenuScale, 25 * MenuScale, I_Loc\OptionName_Usertrackscan,False)
-						;If MouseOn(x,y+30*MenuScale,190*MenuScale,25*MenuScale) And OnSliderID=0
-						;	DrawOptionsTooltip(tx,ty,tw,th,"usertrackscan")
-						;EndIf
-					EndIf
 					;[End Block]
 				Case 3 ;Controls
 					SetFont Font1
@@ -8077,15 +8041,6 @@ Function DrawMenu()
 					AchvMSGenabled% = DrawTick(x + 270 * MenuScale, y, AchvMSGenabled%)
 					If MouseOn(x+270*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale) And OnSliderID=0
 						DrawOptionsTooltip(tx,ty,tw,th,"achpopup")
-					EndIf
-					
-					y = y + 50*MenuScale
-
-					Color 255,255,255
-					Text(x, y, I_Loc\OptionName_Launcher)
-					LauncherEnabled% = DrawTick(x + 270 * MenuScale, y, False, True)
-					If MouseOn(x+270*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale) And OnSliderID=0
-						DrawOptionsTooltip(tx,ty,tw,th,"launcher")
 					EndIf
 					
 					y = y + 50*MenuScale
