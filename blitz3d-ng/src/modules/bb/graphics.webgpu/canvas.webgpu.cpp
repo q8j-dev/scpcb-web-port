@@ -13,7 +13,7 @@ WebGPUCanvas::WebGPUCanvas( WebGPUContextResources *res,int w,int h,int f ):
 	res(res),width(w),height(h),pixels(0),lock_count(0),font(0),
 	scale_x(1.0f),scale_y(1.0f),origin_x(0),origin_y(0),handle_x(0),handle_y(0),
 	mask(0),pixmap(0),dirty(false),pixmap_stale(false),clear_pending(false),
-	gpu_written(false),is_surface(false),hit_valid(false),cube_face(0),cube_mode(0),
+	gpu_written(false),is_surface(false),float_format(false),hit_valid(false),cube_face(0),cube_mode(0),
 	texture(0),twidth(0),theight(0),texture_view(0){
 	flags=f;
 
@@ -55,7 +55,8 @@ void WebGPUCanvas::resize( int w,int h,float d ){
 
 
 WGPUTextureFormat WebGPUCanvas::format()const{
-	return is_surface?res->surface_format:WGPUTextureFormat_RGBA8Unorm;
+	if( is_surface ) return res->surface_format;
+	return float_format?WGPUTextureFormat_RGBA16Float:WGPUTextureFormat_RGBA8Unorm;
 }
 
 void WebGPUCanvas::ensureTexture(){
@@ -80,7 +81,7 @@ void WebGPUCanvas::ensureTexture(){
 	           WGPUTextureUsage_CopySrc|WGPUTextureUsage_CopyDst;
 	desc.dimension=WGPUTextureDimension_2D;
 	desc.size={ (uint32_t)w,(uint32_t)h,1 };
-	desc.format=WGPUTextureFormat_RGBA8Unorm;
+	desc.format=format();
 	desc.mipLevelCount=1;
 	desc.sampleCount=1;
 	texture=wgpuDeviceCreateTexture( res->device,&desc );
@@ -115,6 +116,10 @@ void WebGPUCanvas::getClsColorf( float col[4] )const{
 
 void WebGPUCanvas::uploadData(){
 	if( !res->device ) return;
+	if( float_format ){
+		dirty=false;
+		return;
+	}
 
 	BBPixmap *pm=0;
 	const void *data=0;
@@ -204,7 +209,7 @@ static void bbOnMapped( WGPUMapAsyncStatus status,WGPUStringView message,void *u
 }
 
 bool WebGPUCanvas::readbackInto( unsigned char *dst ){
-	if( !dst || !res->device || width<=0 || height<=0 ) return false;
+	if( !dst || !res->device || width<=0 || height<=0 || float_format ) return false;
 
 	WGPUTexture tex;
 	WGPUTextureFormat fmt=format();

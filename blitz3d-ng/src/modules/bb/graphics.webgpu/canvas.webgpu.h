@@ -31,6 +31,7 @@ protected:
 	bool gpu_written;
 
 	bool is_surface;
+	bool float_format;
 
 	std::vector<unsigned char> hit_mask;
 	bool hit_valid;
@@ -66,6 +67,7 @@ public:
 	void resize( int w,int h,float d );
 
 	bool isSurface()const{ return is_surface; }
+	void useFloatFormat(){ float_format=true; }
 	bool needsUpload()const{ return dirty; }
 	bool gpuWritten()const{ return gpu_written; }
 	WGPUTextureFormat format()const;

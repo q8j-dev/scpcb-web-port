@@ -698,6 +698,7 @@ WebGPUGraphics::WebGPUGraphics( SDL_Window *wnd ):wnd(wnd),def_font(0),fb(0){
 	bbAppOnChange.add( onAppChange,this );
 
 	fb=d_new WebGPUCanvas( &res,BBCanvas::CANVAS_TEX_VIDMEM );
+	fb->useFloatFormat();
 
 	front_canvas=fb;
 	back_canvas=fb;
@@ -761,7 +762,7 @@ void WebGPUGraphics::present(){
 	state.res[1]=(float)res.surface_height;
 	state.texscale[0]=1.0f;state.texscale[1]=1.0f;
 	state.color[0]=state.color[1]=state.color[2]=1.0f;
-	state.texenabled=1;
+	state.texenabled=2;
 	state.scale[0]=1.0f;state.scale[1]=1.0f;
 	uint32_t uoffset=res.pushUniforms( state );
 
