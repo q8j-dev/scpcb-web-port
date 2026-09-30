@@ -363,9 +363,15 @@ void Linker_LLD::createExe( bool debug,const std::string &rt,const Target &targe
 			if( key.size()>1 && extra.find( key )!=std::string::npos ) return;
 			cmd+=flag+" ";
 		};
-		cmd+="-fexceptions ";
-		setting( "-sASYNCIFY=1" );
-		setting( "-sASYNCIFY_STACK_SIZE=1048576" );
+		const char *jspi_env=getenv( "SCPCB_JSPI" );
+		if( jspi_env && std::string(jspi_env)=="1" ){
+			cmd+="-fwasm-exceptions ";
+			setting( "-sJSPI=1" );
+		}else{
+			cmd+="-fexceptions ";
+			setting( "-sASYNCIFY=1" );
+			setting( "-sASYNCIFY_STACK_SIZE=1048576" );
+		}
 		setting( "-sALLOW_MEMORY_GROWTH=1" );
 		setting( "-sINITIAL_MEMORY=536870912" );
 		setting( "-sSTACK_SIZE=16777216" );

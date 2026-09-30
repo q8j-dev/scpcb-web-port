@@ -270,6 +270,7 @@ static void em_schedule( int ms ){
 
 static void em_pump( void* ){
 	em_pump_scheduled=false;
+#ifndef BB_JSPI
 	int busy = EM_ASM_INT({
 		return (typeof Asyncify !== 'undefined' && Asyncify.state !== 0) ? 1 : 0;
 	});
@@ -277,6 +278,7 @@ static void em_pump( void* ){
 		em_schedule( EM_PUMP_URGENT_MS );
 		return;
 	}
+#endif
 	alGetError();
 	bool urgent=false;
 	for( auto it=em_streams.begin(); it!=em_streams.end(); ){
