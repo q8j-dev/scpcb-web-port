@@ -1,15 +1,4 @@
 #!/usr/bin/env python3
-"""One-command build for macOS, Windows and Linux.
-
-    python3 build.py            # everything
-    python3 build.py --help     # individual steps
-
-Steps: deps -> llvm -> blitzcc -> runtime -> pack -> game
-Each step skips itself if its output is already there, so re-running is cheap.
-You need CMake, Ninja, Python 3 and an activated Emscripten SDK. On Windows
-also Visual Studio 2022 with the C++ and MFC components (the script finds it
-for you, no special prompt needed).
-"""
 import argparse
 import configparser
 import glob
@@ -53,8 +42,6 @@ elif SYSTEM == "Linux":
 else:
     sys.exit(f"error: unsupported platform {SYSTEM}")
 
-# Emscripten's wrappers run "python3" from PATH; make sure that's the interpreter
-# running this script (the system one is often too old).
 os.environ["PATH"] = os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")
 os.environ.setdefault("EMSDK_PYTHON", sys.executable)
 
@@ -84,8 +71,6 @@ def jobs():
 
 
 def load_msvc_env():
-    """Windows: pull in the Visual Studio compiler environment if we aren't
-    already inside a developer prompt."""
     if SYSTEM != "Windows" or shutil.which("cl"):
         return
     pf = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
@@ -131,11 +116,7 @@ def extract_zip_keep_modes(zip_path, dest):
                 os.chmod(os.path.join(dest, info.filename), mode)
 
 
-# ---------------------------------------------------------------- steps
-
 UPSTREAM_URL = "https://github.com/blitz3d-ng/blitz3d-ng.git"
-# blitz3d-ng/deps isn't kept in this repo. Clone upstream blitz3d-ng with its
-# pinned submodule commits and copy its deps/ tree into place.
 GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
 DEPS_MARKERS = [
     os.path.join("zlib", "tree"),
@@ -168,7 +149,6 @@ def step_deps():
         cfg = configparser.ConfigParser()
         with open(os.path.join(clone, ".gitmodules"), encoding="utf-8") as f:
             cfg.read_string(f.read().replace('[submodule "', "[").replace('"]', "]"))
-        # deps/llvm is only needed to build LLVM, which step_llvm does itself
         paths = [cfg[sec]["path"] for sec in cfg.sections() if cfg[sec]["path"] != "deps/llvm"]
 
         for path in paths:
@@ -214,8 +194,6 @@ def step_llvm():
             extract_zip_keep_modes(zp, NG)
         return
 
-    # No prebuilt archive for Linux (or Intel Macs): build LLVM from source.
-    # Slow (30-90 minutes) but only ever happens once.
     print("  no prebuilt LLVM for this platform, building from source (slow, one time)")
     need("cmake", "Install CMake.")
     need("ninja", "Install Ninja.")
@@ -247,7 +225,6 @@ def step_blitzcc():
     if SYSTEM != "Windows":
         cfg.append("-DOUTPUT_PATH=")
     if SYSTEM == "Darwin":
-        # the pinned zlib stubs out fdopen(), which clashes with current macOS SDK headers
         cfg.append("-DCMAKE_C_FLAGS=-Dfdopen=fdopen")
     run(cfg)
     run(["cmake", "--build", NATIVE_BUILD, "--target", "blitzcc", "-j", jobs()])
