@@ -116,10 +116,7 @@ EndIf
 ; Used for rich presence
 Global PlayerArea%
 
-Global IsRestart% = False
-.Start
 Global IsRunning% = True
-Global ShouldRestart% = False
 
 Include "ModManager.bb"
 Global HasDubbedAudio%
@@ -232,7 +229,7 @@ LoadLocalization(I_Loc, StringsFile)
 
 
 ; Exclusive fullscreen ONLY supports the reported resolutions
-If (LauncherEnabled Lor HasCLIFlag("launcher")) And (Not IsRestart) And (Not HasCLIFlag("nolauncher")) Lor Fullscreen And (Not GfxMode3DExists(GraphicWidth, GraphicHeight, 32-16*Bit16Mode)) Then
+If (LauncherEnabled Lor HasCLIFlag("launcher")) And (Not HasCLIFlag("nolauncher")) Lor Fullscreen And (Not GfxMode3DExists(GraphicWidth, GraphicHeight, 32-16*Bit16Mode)) Then
 	UpdateLauncher()
 EndIf
 
@@ -3781,22 +3778,8 @@ While IsRunning
 	Flip Vsync Lor MainMenuOpen
 Wend
 
-If ShouldRestart Then
-	IsRestart = True
-	Goto Start
-EndIf
-
 If SteamActive Then Steam_Shutdown()
 If DiscordActive Then BlitzcordClearActivity()
-
-Function Restart()
-	Cls
-	StopStream_Strict(MusicCHN)
-	MusicCHN = 0
-	ClearLoadedINIFiles()
-	IsRunning = False
-	ShouldRestart = True
-End Function
 
 Function GetCurrentPlayerArea%()
 	If MainMenuOpen Then Return -1
@@ -12404,7 +12387,7 @@ Function PlayMovie(moviefile$)
 End Function
 
 Function PlayStartupVideos()
-	If GetOptionInt("general","play startup video") = 0 Lor IsRestart Lor HasCLIFlag("novid") Then Return
+	If GetOptionInt("general","play startup video") = 0 LorHasCLIFlag("novid") Then Return
 
 	PlayMovie("GFX\menu\startup_Undertow")
 	PlayMovie("GFX\menu\startup_TSS")

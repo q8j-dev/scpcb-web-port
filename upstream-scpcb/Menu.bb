@@ -272,12 +272,8 @@ Function UpdateMainMenu()
 					CurrLoadGamePage = 0
 					MainMenuTab = 0
 					SerializeMods()
-					If ModsDirty Then
-						ModsDirty = False
-						Restart()
-					Else
-						UpdateActiveMods()
-					EndIf
+					ModsDirty = False
+					UpdateActiveMods()
 				Default
 					MainMenuTab = 0
 			End Select
@@ -1320,13 +1316,6 @@ Function UpdateMainMenu()
 						If DrawButton(x + 10 * MenuScale, y, 150 * MenuScale, 30 * MenuScale, I_Loc\Mods_Reloadmods, False, False, UpdatingMod<>Null) Then
 							SerializeMods()
 							ReloadMods()
-						EndIf
-						y = y + 40 * MenuScale
-
-						If DrawButton(x + 10 * MenuScale, y, 150 * MenuScale, 30 * MenuScale, I_Loc\Mods_Reloadgame, False, False, UpdatingMod<>Null) Then
-							SerializeMods()
-							Restart()
-							Return
 						EndIf
 						y = y + 40 * MenuScale
 
