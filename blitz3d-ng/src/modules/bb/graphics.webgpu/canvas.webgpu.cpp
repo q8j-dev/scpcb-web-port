@@ -226,6 +226,28 @@ void WebGPUCanvas::uploadData(){
 
 	pixmap_stale=false;
 	delete pm;
+
+	if( !is_surface && !pixels && pixmap && pixmap->bits && texture ){
+		delete[] pixmap->bits;
+		pixmap->bits=0;
+	}
+}
+
+void WebGPUCanvas::ensureCpuCopy(){
+	if( !pixmap ) return;
+	if( pixmap->bits ){
+		syncPixmapFromTexture();
+		return;
+	}
+	if( pixmap->bpp!=4 || width<=0 || height<=0 || pixmap->width!=width || pixmap->height!=height ) return;
+
+	pixmap->bits=new unsigned char[(size_t)width*height*4];
+	if( readbackInto( pixmap->bits ) ){
+		pixmap_stale=false;
+	}else{
+		delete[] pixmap->bits;
+		pixmap->bits=0;
+	}
 }
 
 struct BBMapRequest{
@@ -991,7 +1013,7 @@ void WebGPUCanvas::setFont( BBFont *f ){
 void WebGPUCanvas::setMask( unsigned argb ){
 	mask=argb;
 	flags|=CANVAS_TEX_MASK;
-	syncPixmapFromTexture();
+	ensureCpuCopy();
 	dirty=true;
 	hit_valid=false;
 }

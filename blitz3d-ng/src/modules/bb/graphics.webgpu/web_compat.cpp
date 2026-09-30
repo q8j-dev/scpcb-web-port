@@ -62,6 +62,28 @@ BBPixmap *bbLoadPixmapWithFreeImage( const std::string &path ){
 	return pm;
 }
 
+BBPixmap *bbLoadPixmapRGBA( const std::string &path ){
+	std::streambuf *sb=gx_filesys->openFile( path,std::ios_base::in );
+	if( !sb ) return 0;
+	std::string data; char tmp[65536]; std::streamsize n;
+	while( (n=sb->sgetn(tmp,sizeof tmp))>0 ) data.append( tmp,(size_t)n );
+	delete sb;
+	if( data.empty() ) return 0;
+
+	int w=0,h=0,ch=0;
+	stbi_uc *pix=stbi_load_from_memory( (const stbi_uc*)data.data(),(int)data.size(),&w,&h,&ch,4 );
+	if( !pix ) return 0;
+
+	BBPixmap *pm=new BBPixmap();
+	pm->format=PF_RGBA;
+	pm->width=w; pm->height=h; pm->depth=32; pm->pitch=w*4; pm->bpp=4;
+	pm->trans=(ch==4) || pngHasAlpha( data );
+	pm->bits=new unsigned char[(size_t)w*4*h];
+	memcpy( pm->bits,pix,(size_t)w*4*h );
+	stbi_image_free( pix );
+	return pm;
+}
+
 bool runtime_html_create(){ return true; }
 bool runtime_html_destroy(){ return true; }
 

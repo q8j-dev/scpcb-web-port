@@ -27,6 +27,8 @@ static std::set<OpenALChannel*> channel_set;
 static std::vector<OpenALChannel*> idle_channels;
 static std::set<OpenALChannel*> em_streams;
 static bool em_pump_scheduled=false;
+static double sound_load_ms=0;
+static int sound_load_count=0;
 
 static float g_rolloff=1.0f;
 static float g_distscale=1.0f;
@@ -458,6 +460,7 @@ public:
 	}
 
 	BBSound *loadSound( const std::string &filename,bool use_3d ){
+		double started=emscripten_get_now();
 		AudioStream *stream=loadStream( filename );
 		if( !stream ){
 			return 0;
@@ -466,6 +469,11 @@ public:
 		OpenALSound *sound=d_new OpenALSound();
 		sound->setStream( stream );
 		sound_set.insert( sound );
+
+		sound_load_ms+=emscripten_get_now()-started;
+		if( ++sound_load_count%50==0 ){
+			printf( "[perf] sounds loaded=%d total=%.0fms\n",sound_load_count,sound_load_ms );
+		}
 		return sound;
 	}
 

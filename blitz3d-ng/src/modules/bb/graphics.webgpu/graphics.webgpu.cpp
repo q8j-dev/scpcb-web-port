@@ -3,6 +3,7 @@
 #include "canvas.webgpu.h"
 
 #include <cstring>
+#include <emscripten/heap.h>
 #include <vector>
 #include <fstream>
 
@@ -1037,18 +1038,18 @@ BBCanvas *WebGPUGraphics::createCanvas( int width,int height,int flags ){
 	return canvas;
 }
 
+BBPixmap *bbLoadPixmapRGBA( const std::string &path );
+
 static double bb_load_ms=0;
 static int bb_load_count=0;
 static int bb_load_reported=0;
 static double bb_load_report_time=0;
+static size_t bb_heap_reported_mb=0;
 
 BBCanvas *WebGPUGraphics::loadCanvas( const std::string &file,int flags ){
 	double started=emscripten_get_now();
-	BBPixmap *pixmap=bbLoadPixmap( file );
+	BBPixmap *pixmap=bbLoadPixmapRGBA( canonicalpath( file ) );
 	if( !pixmap ) return 0;
-
-	pixmap->flipVertically();
-	pixmap->swapBytes0and2();
 
 	if( (flags&BBCanvas::CANVAS_TEX_ALPHA) && !(flags&BBCanvas::CANVAS_TEX_MASK) && !pixmap->trans ){
 		pixmap->buildAlpha( !(flags&BBCanvas::CANVAS_TEX_RGB) );
@@ -1154,12 +1155,17 @@ void WebGPUContextDriver::flip( bool vwait ){
 
 	g->present();
 
-	if( bb_load_count!=bb_load_reported ){
-		double now=emscripten_get_now();
-		if( now-bb_load_report_time>=1000.0 ){
+	double now=emscripten_get_now();
+	if( now-bb_load_report_time>=1000.0 ){
+		bb_load_report_time=now;
+		if( bb_load_count!=bb_load_reported ){
 			LOGD( "[perf] textures loaded=%d total=%.0fms",bb_load_count,bb_load_ms );
 			bb_load_reported=bb_load_count;
-			bb_load_report_time=now;
+		}
+		size_t heap_mb=emscripten_get_heap_size()>>20;
+		if( heap_mb!=bb_heap_reported_mb ){
+			LOGD( "[perf] wasm heap=%zuMB",heap_mb );
+			bb_heap_reported_mb=heap_mb;
 		}
 	}
 

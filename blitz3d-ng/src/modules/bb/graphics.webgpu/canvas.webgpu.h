@@ -53,6 +53,7 @@ protected:
 	void downloadData();
 	bool readbackInto( unsigned char *dst );
 	void syncPixmapFromTexture();
+	void ensureCpuCopy();
 
 public:
 	WebGPUCanvas( WebGPUContextResources *res,int f );
@@ -107,7 +108,7 @@ public:
 	bool collide( int x,int y,const BBCanvas *src,int src_x,int src_y,bool solid );
 	bool rect_collide( int x,int y,int rect_x,int rect_y,int rect_w,int rect_h,bool solid );
 
-	BBPixmap *getPixmap(){ return pixmap; }
+	BBPixmap *getPixmap(){ ensureCpuCopy();return pixmap; }
 	bool stretchTo( BBCanvas *dest,bool filter );
 
 	bool lock();
