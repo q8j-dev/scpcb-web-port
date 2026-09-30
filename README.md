@@ -27,4 +27,4 @@ The first Linux build compiles LLVM from source, which takes an hour or more. ma
 python3 build.py --serve
 ```
 
-Then open http://127.0.0.1:8090/ in a browser that supports WebGPU. Chrome and Edge work best.
+Then open http://127.0.0.1:8090/ in a browser that supports WebGPU. Chrome and Edge work best. Alt+Enter toggles fullscreen.

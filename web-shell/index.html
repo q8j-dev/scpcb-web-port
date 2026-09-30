@@ -38,9 +38,10 @@
   addEventListener('fullscreenchange', fit);
 
   addEventListener('keydown', (e) => {
-    if (e.code === 'KeyF' && !e.repeat && document.pointerLockElement !== canvas) {
-      const el = document.documentElement;
-      if (!document.fullscreenElement && el.requestFullscreen) el.requestFullscreen().catch(()=>{});
+    if (e.altKey && e.code === 'Enter' && !e.repeat) {
+      e.preventDefault();
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
     }
   }, true);
   canvas.addEventListener('mousedown', () => { canvas.focus(); });
@@ -56,6 +57,62 @@
   document.exitPointerLock = function(){
     try { if (epl) epl(); } catch (e) {}
   };
+
+  const DB_NAME = 'scpcb';
+  const DB_STORE = 'kv';
+  const persisted = { db: null, options: null, saves: {} };
+
+  const idbOpen = () => new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  const idbGet = (key) => new Promise((resolve) => {
+    try {
+      const req = persisted.db.transaction(DB_STORE).objectStore(DB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(undefined);
+    } catch (e) { resolve(undefined); }
+  });
+  const idbPut = (key, value) => new Promise((resolve) => {
+    try {
+      const tx = persisted.db.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).put(value, key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = tx.onabort = () => { console.warn('could not store ' + key, tx.error); resolve(false); };
+    } catch (e) { console.warn('could not store ' + key, e); resolve(false); }
+  });
+
+  const b64dec = (str) => {
+    const s = atob(str);
+    const b = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+    return b;
+  };
+
+  async function loadPersisted() {
+    try { persisted.db = await idbOpen(); } catch (e) { console.warn('IndexedDB unavailable, progress will not be saved', e); return; }
+    persisted.options = (await idbGet('options')) ?? null;
+    persisted.saves = (await idbGet('saves')) ?? {};
+
+    try {
+      const oldOptions = localStorage.getItem('scpcb.options');
+      const oldSaves = localStorage.getItem('scpcb.saves');
+      if (!oldOptions && !oldSaves) return;
+      if (persisted.options === null && oldOptions) persisted.options = oldOptions;
+      if (!Object.keys(persisted.saves).length && oldSaves) {
+        const tree = JSON.parse(oldSaves);
+        for (const p in tree) persisted.saves[p] = b64dec(tree[p]);
+      }
+      const ok = (persisted.options === null || await idbPut('options', persisted.options)) &&
+                 await idbPut('saves', persisted.saves);
+      if (ok) {
+        localStorage.removeItem('scpcb.options');
+        localStorage.removeItem('scpcb.saves');
+      }
+    } catch (e) {}
+  }
 
   let maxPct = 0;
   var Module = {
@@ -125,7 +182,6 @@
       if (FS.lstat) wrap(FS, 'lstat');
       if (FS.readdir) wrap(FS, 'readdir');
     }, () => {
-      const LS_KEY = 'scpcb.options';
       const OPTIONS_DIR = '/Undertow Games/SCP - Containment Breach';
       const OPTIONS_PATH = OPTIONS_DIR + '/options.ini';
       const mkdirp = (path) => {
@@ -133,15 +189,9 @@
         let cur = '';
         for (const part of parts) { cur += '/' + part; try { FS.mkdir(cur); } catch (e) {} }
       };
-      // The new source creates its options file itself (InitOptionsFile) at
-      // runtime, only if one doesn't already exist there - so pre-writing a
-      // restored copy here (before bbMain starts) is picked up as-is and
-      // never overwritten. This must not block startup (no run dependency):
-      // the game creates this path itself if we don't, so waiting on its
-      // existence here would deadlock against the very code that creates it.
       try {
         mkdirp(OPTIONS_DIR);
-        const saved = localStorage.getItem(LS_KEY);
+        const saved = persisted.options;
         if (saved) FS.writeFile(OPTIONS_PATH, saved);
         const resOf = (t) => {
           const w = /^width *= *(\d+)/m.exec(t), h = /^height *= *(\d+)/m.exec(t);
@@ -155,21 +205,13 @@
             if (bootRes === null) bootRes = resOf(cur);
             if (cur !== last) {
               last = cur;
-              localStorage.setItem(LS_KEY, cur);
+              if (persisted.db) idbPut('options', cur);
               if (resOf(cur) !== bootRes) location.reload();
             }
           } catch (e) {}
         }, 1000);
       } catch (e) {}
 
-      const SAVES_KEY = 'scpcb.saves';
-      const b64enc = (bytes) => {
-        let s = '';
-        for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-        return btoa(s);
-      };
-      const b64dec = (str) => { const s = atob(str); const b = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i); return b; };
-      // Collects every file under dir into out as path -> {size, mtime}.
       const walk = (dir, out) => {
         let names;
         try { names = FS.readdir(dir); } catch (e) { return; }
@@ -184,29 +226,26 @@
       };
       try { FS.mkdir('/Saves'); } catch (e) {}
       try {
-        const savedTree = localStorage.getItem(SAVES_KEY);
-        if (savedTree) {
-          const tree = JSON.parse(savedTree);
-          for (const p in tree) {
-            mkdirp(p.slice(0, p.lastIndexOf('/')));
-            FS.writeFile(p, b64dec(tree[p]));
-          }
+        for (const p in persisted.saves) {
+          mkdirp(p.slice(0, p.lastIndexOf('/')));
+          FS.writeFile(p, persisted.saves[p]);
         }
       } catch (e) {}
-      // Only re-encode the saves when a file's size or mtime changed.
       let lastSig = null;
       const persistSaves = () => {
+        if (!persisted.db) return;
         try {
           const files = {};
           walk('/Saves', files);
           const sig = JSON.stringify(files);
           if (sig === lastSig) return;
-          const out = {};
-          for (const p in files) out[p] = b64enc(FS.readFile(p));
-          if (sig !== '{}') localStorage.setItem(SAVES_KEY, JSON.stringify(out));
           lastSig = sig;
+          if (sig === '{}') return;
+          const out = {};
+          for (const p in files) out[p] = FS.readFile(p);
+          idbPut('saves', out);
         } catch (e) {
-          console.warn('could not store saves (browser storage full?)', e);
+          console.warn('could not store saves', e);
         }
       };
       lastSig = (() => { const f = {}; walk('/Saves', f); return JSON.stringify(f); })();
@@ -269,6 +308,8 @@
       fail('Failed to load game assets: ' + e.message);
       return;
     }
+
+    await loadPersisted();
 
     const s = document.createElement('script');
     s.async = true;
