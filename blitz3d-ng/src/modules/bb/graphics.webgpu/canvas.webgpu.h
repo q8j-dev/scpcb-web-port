@@ -31,7 +31,7 @@ protected:
 	bool gpu_written;
 
 	bool is_surface;
-	bool float_format;
+	bool wide_format;
 	bool use_mips;
 	int mip_levels;
 	WGPUTextureView level0_view;
@@ -71,7 +71,7 @@ public:
 	void resize( int w,int h,float d );
 
 	bool isSurface()const{ return is_surface; }
-	void useFloatFormat(){ float_format=true; }
+	void useWideFormat(){ wide_format=true; }
 	bool needsUpload()const{ return dirty||mips_dirty; }
 	bool gpuWritten()const{ return gpu_written; }
 	WGPUTextureFormat format()const;

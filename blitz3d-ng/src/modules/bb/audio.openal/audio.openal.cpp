@@ -9,6 +9,7 @@
 #include <AL/alc.h>
 
 #include <string.h>
+#include <stdio.h>
 #include <cmath>
 #include <set>
 #include <vector>
@@ -268,8 +269,12 @@ static void em_schedule( int ms ){
 	}
 }
 
+static double em_pump_total_ms=0,em_pump_max_ms=0,em_pump_report=0;
+static int em_pump_count=0;
+
 static void em_pump( void* ){
 	em_pump_scheduled=false;
+	double pump_started=emscripten_get_now();
 #ifndef BB_JSPI
 	int busy = EM_ASM_INT({
 		return (typeof Asyncify !== 'undefined' && Asyncify.state !== 0) ? 1 : 0;
@@ -294,6 +299,21 @@ static void em_pump( void* ){
 		}
 	}
 	if( !em_streams.empty() ) em_schedule( urgent ? EM_PUMP_URGENT_MS : EM_PUMP_NORMAL_MS );
+
+	double now=emscripten_get_now();
+	double spent=now-pump_started;
+	em_pump_total_ms+=spent;
+	if( spent>em_pump_max_ms ) em_pump_max_ms=spent;
+	++em_pump_count;
+	if( now-em_pump_report>=10000.0 ){
+		if( em_pump_count>0 && em_pump_report>0 ){
+			printf( "[perf] audio pump calls=%d avg=%.2fms max=%.2fms\n",em_pump_count,em_pump_total_ms/em_pump_count,em_pump_max_ms );
+		}
+		em_pump_report=now;
+		em_pump_total_ms=0;
+		em_pump_max_ms=0;
+		em_pump_count=0;
+	}
 }
 
 static void em_register_stream( OpenALChannel *c ){

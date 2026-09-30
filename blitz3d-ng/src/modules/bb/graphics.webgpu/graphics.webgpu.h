@@ -83,8 +83,23 @@ struct WebGPUContextResources{
 	WGPURenderPipeline mip_pipeline=0;
 
 	WGPUCommandEncoder encoder=0;
+	WGPUCommandEncoder mip_encoder=0;
 	WGPURenderPassEncoder pass=0;
 	WebGPUCanvas *pass_target=0;
+
+	WGPURenderPipeline bound_pipeline=0;
+	WGPUBindGroup bound_group=0;
+	uint32_t bound_group_offset=0;
+	bool bound_group_offset_valid=false;
+	WGPUBuffer bound_vertex_buffer=0;
+	int bound_scissor[4]={};
+	bool bound_scissor_valid=false;
+	bool pending_draw=false;
+	uint32_t pending_first=0,pending_count=0;
+
+	BBWebGPURenderState last_state;
+	uint32_t last_state_offset=0;
+	bool last_state_valid=false;
 
 	std::map<std::pair<WGPUTextureView,WGPUSampler>,WGPUBindGroup> bind_groups;
 
@@ -115,6 +130,9 @@ struct WebGPUContextResources{
 	WGPUBindGroup getBindGroup( WGPUTextureView view,WGPUSampler sampler );
 	uint32_t pushVertices( const BBWebGPUVertex *verts,int count );
 	uint32_t pushUniforms( const BBWebGPURenderState &state );
+	uint32_t pushUniformsCached( const BBWebGPURenderState &state );
+	void resetPassState();
+	void flushPendingDraw();
 
 	void invalidateBindGroupsFor( WGPUTextureView view );
 

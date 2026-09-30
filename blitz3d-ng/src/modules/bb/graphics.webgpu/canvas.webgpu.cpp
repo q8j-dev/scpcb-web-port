@@ -13,7 +13,7 @@ WebGPUCanvas::WebGPUCanvas( WebGPUContextResources *res,int w,int h,int f ):
 	res(res),width(w),height(h),pixels(0),lock_count(0),font(0),
 	scale_x(1.0f),scale_y(1.0f),origin_x(0),origin_y(0),handle_x(0),handle_y(0),
 	mask(0),pixmap(0),dirty(false),pixmap_stale(false),clear_pending(false),
-	gpu_written(false),is_surface(false),float_format(false),use_mips(false),mip_levels(1),level0_view(0),mips_dirty(false),hit_valid(false),cube_face(0),cube_mode(0),
+	gpu_written(false),is_surface(false),wide_format(false),use_mips(false),mip_levels(1),level0_view(0),mips_dirty(false),hit_valid(false),cube_face(0),cube_mode(0),
 	texture(0),twidth(0),theight(0),texture_view(0){
 	flags=f;
 
@@ -60,7 +60,7 @@ void WebGPUCanvas::resize( int w,int h,float d ){
 
 WGPUTextureFormat WebGPUCanvas::format()const{
 	if( is_surface ) return res->surface_format;
-	return float_format?WGPUTextureFormat_RGBA16Float:WGPUTextureFormat_RGBA8Unorm;
+	return wide_format?WGPUTextureFormat_RGB10A2Unorm:WGPUTextureFormat_RGBA8Unorm;
 }
 
 void WebGPUCanvas::ensureTexture(){
@@ -91,7 +91,7 @@ void WebGPUCanvas::ensureTexture(){
 	desc.size={ (uint32_t)w,(uint32_t)h,1 };
 	desc.format=format();
 	mip_levels=1;
-	if( use_mips && !float_format ){
+	if( use_mips && !wide_format ){
 		int longest=w>h?w:h;
 		while( longest>1 ){ longest>>=1;++mip_levels; }
 	}
@@ -149,7 +149,7 @@ void WebGPUCanvas::getClsColorf( float col[4] )const{
 
 void WebGPUCanvas::uploadData(){
 	if( !res->device ) return;
-	if( float_format ){
+	if( wide_format ){
 		dirty=false;
 		return;
 	}
@@ -243,7 +243,7 @@ static void bbOnMapped( WGPUMapAsyncStatus status,WGPUStringView message,void *u
 }
 
 bool WebGPUCanvas::readbackInto( unsigned char *dst ){
-	if( !dst || !res->device || width<=0 || height<=0 || float_format ) return false;
+	if( !dst || !res->device || width<=0 || height<=0 || wide_format ) return false;
 
 	WGPUTexture tex;
 	WGPUTextureFormat fmt=format();
@@ -411,16 +411,56 @@ void WebGPUCanvas::draw2d( WGPUPrimitiveTopology topology,bool blend,WGPUTexture
 	state.color[0]=col[0];state.color[1]=col[1];state.color[2]=col[2];
 	state.texenabled=texenabled?1:0;
 	state.scale[0]=scale[0];state.scale[1]=scale[1];
-	uint32_t uoffset=res->pushUniforms( state );
+	uint32_t uoffset=res->pushUniformsCached( state );
 
 	WGPURenderPassEncoder pass=res->ensurePass( this );
 	if( !pass ) return;
 
-	wgpuRenderPassEncoderSetScissorRect( pass,(uint32_t)cx,(uint32_t)cy,(uint32_t)cw,(uint32_t)ch );
-	wgpuRenderPassEncoderSetPipeline( pass,res->getPipeline( topology,blend,format() ) );
-	wgpuRenderPassEncoderSetBindGroup( pass,0,res->getBindGroup( tex,sampler ),1,&uoffset );
-	wgpuRenderPassEncoderSetVertexBuffer( pass,0,res->vertex_buffer,voffset,vbytes );
-	wgpuRenderPassEncoderDraw( pass,(uint32_t)nverts,1,0,0 );
+	WGPURenderPipeline pipeline=res->getPipeline( topology,blend,format() );
+	WGPUBindGroup group=res->getBindGroup( tex,sampler );
+
+	bool scissor_changed=!res->bound_scissor_valid||res->bound_scissor[0]!=cx||res->bound_scissor[1]!=cy||
+	                     res->bound_scissor[2]!=cw||res->bound_scissor[3]!=ch;
+	bool pipeline_changed=pipeline!=res->bound_pipeline;
+	bool group_changed=group!=res->bound_group||!res->bound_group_offset_valid||res->bound_group_offset!=uoffset;
+	bool buffer_changed=res->bound_vertex_buffer!=res->vertex_buffer;
+	bool changed=scissor_changed||pipeline_changed||group_changed||buffer_changed;
+
+	if( changed ) res->flushPendingDraw();
+
+	if( scissor_changed ){
+		wgpuRenderPassEncoderSetScissorRect( pass,(uint32_t)cx,(uint32_t)cy,(uint32_t)cw,(uint32_t)ch );
+		res->bound_scissor[0]=cx;res->bound_scissor[1]=cy;res->bound_scissor[2]=cw;res->bound_scissor[3]=ch;
+		res->bound_scissor_valid=true;
+	}
+	if( pipeline_changed ){
+		wgpuRenderPassEncoderSetPipeline( pass,pipeline );
+		res->bound_pipeline=pipeline;
+	}
+	if( group_changed ){
+		wgpuRenderPassEncoderSetBindGroup( pass,0,group,1,&uoffset );
+		res->bound_group=group;
+		res->bound_group_offset=uoffset;
+		res->bound_group_offset_valid=true;
+	}
+	if( buffer_changed ){
+		wgpuRenderPassEncoderSetVertexBuffer( pass,0,res->vertex_buffer,0,WGPU_WHOLE_SIZE );
+		res->bound_vertex_buffer=res->vertex_buffer;
+	}
+
+	uint32_t first=(uint32_t)( voffset/sizeof( BBWebGPUVertex ) );
+	bool strip=( topology==WGPUPrimitiveTopology_LineStrip||topology==WGPUPrimitiveTopology_TriangleStrip );
+	if( !changed&&!strip&&res->pending_draw&&res->pending_first+res->pending_count==first ){
+		res->pending_count+=(uint32_t)nverts;
+	}else{
+		res->flushPendingDraw();
+		res->pending_first=first;
+		res->pending_count=(uint32_t)nverts;
+		res->pending_draw=!strip;
+		if( strip ){
+			wgpuRenderPassEncoderDraw( pass,(uint32_t)nverts,1,first,0 );
+		}
+	}
 
 	pixmap_stale=true;
 	gpu_written=true;
@@ -593,7 +633,9 @@ void WebGPUCanvas::text( int x,int y,const std::string &t ){
 		wgpuQueueWriteTexture( res->queue,&dst,bmp.data(),bmp.size(),&layout,&extent );
 	}
 
-	std::vector<BBWebGPUVertex> verts;
+	static std::vector<BBWebGPUVertex> verts;
+	verts.clear();
+	verts.reserve( t.size()*6 );
 
 	float fy=(float)y+font->baseline*font->density;
 	float fx=(float)x;

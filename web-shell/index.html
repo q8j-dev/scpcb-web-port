@@ -159,7 +159,7 @@
         }
       }
     },
-    postRun: [ () => { setTimeout(() => { loading.style.display = 'none'; }, 350); } ],
+    postRun: [ () => { console.log('[load] runtime up after ' + Math.round(performance.now()) + 'ms'); setTimeout(() => { loading.style.display = 'none'; }, 350); } ],
     preRun: [ () => {
       const LP = FS.lookupPath.bind(FS);
       const cache = new Map();
@@ -549,8 +549,10 @@
     }
     console.log('using the ' + variant + ' build');
 
+    const loadStart = performance.now();
     try {
       const buf = await loadAssets(manifest);
+      console.log('[load] assets ready in ' + Math.round(performance.now() - loadStart) + 'ms');
       Module.getPreloadedPackage = () => buf.buffer;
     } catch (e) {
       fail('Failed to load game assets: ' + e.message);

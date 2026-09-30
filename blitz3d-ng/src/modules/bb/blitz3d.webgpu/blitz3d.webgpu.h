@@ -62,11 +62,11 @@ static_assert( sizeof(BBWebGPUClearState)==32,"BBClearState layout mismatch" );
 struct BBWebGPU3DVertex{
 	float coords[3];
 	float normal[3];
-	float color[4];
+	uint8_t color[4];
 	float tex_coord0[2];
 	float tex_coord1[2];
 };
-static_assert( sizeof(BBWebGPU3DVertex)==56,"3D vertex layout mismatch" );
+static_assert( sizeof(BBWebGPU3DVertex)==44,"3D vertex layout mismatch" );
 
 
 class WebGPUB3DGraphics : public B3DGraphics{

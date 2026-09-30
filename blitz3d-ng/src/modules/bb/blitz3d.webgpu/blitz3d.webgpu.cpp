@@ -113,6 +113,7 @@ public:
 	unsigned int *tris=0;
 
 	WGPUBuffer vertex_buffer=0,index_buffer=0;
+	bool index16=false;
 
 	unsigned drawn_marker=0;
 
@@ -144,10 +145,10 @@ public:
 		verts[n].normal[0]=normal[0];verts[n].normal[1]=normal[1];verts[n].normal[2]=normal[2];
 		verts[n].tex_coord0[0]=tex_coords[0][0];verts[n].tex_coord0[1]=tex_coords[0][1];
 		verts[n].tex_coord1[0]=tex_coords[1][0];verts[n].tex_coord1[1]=tex_coords[1][1];
-		verts[n].color[0]=((argb>>16)&255)/255.0f;
-		verts[n].color[1]=((argb>>8)&255)/255.0f;
-		verts[n].color[2]=(argb&255)/255.0f;
-		verts[n].color[3]=((argb>>24)&255)/255.0f;
+		verts[n].color[0]=(uint8_t)((argb>>16)&255);
+		verts[n].color[1]=(uint8_t)((argb>>8)&255);
+		verts[n].color[2]=(uint8_t)(argb&255);
+		verts[n].color[3]=(uint8_t)((argb>>24)&255);
 	}
 
 	void setTriangle( int n,int v0,int v1,int v2 ){
@@ -601,7 +602,7 @@ public:
 		attrs[1].format=WGPUVertexFormat_Float32x3;
 		attrs[1].offset=offsetof( BBWebGPU3DVertex,normal );
 		attrs[1].shaderLocation=1;
-		attrs[2].format=WGPUVertexFormat_Float32x4;
+		attrs[2].format=WGPUVertexFormat_Unorm8x4;
 		attrs[2].offset=offsetof( BBWebGPU3DVertex,color );
 		attrs[2].shaderLocation=2;
 		attrs[3].format=WGPUVertexFormat_Float32x2;
@@ -1259,7 +1260,7 @@ public:
 			bound_vertex_buffer=mesh->vertex_buffer;
 		}
 		if( mesh->index_buffer!=bound_index_buffer ){
-			wgpuRenderPassEncoderSetIndexBuffer( p,mesh->index_buffer,WGPUIndexFormat_Uint32,0,WGPU_WHOLE_SIZE );
+			wgpuRenderPassEncoderSetIndexBuffer( p,mesh->index_buffer,mesh->index16?WGPUIndexFormat_Uint16:WGPUIndexFormat_Uint32,0,WGPU_WHOLE_SIZE );
 			bound_index_buffer=mesh->index_buffer;
 		}
 		wgpuRenderPassEncoderDrawIndexed( p,(uint32_t)tri_cnt*3,1,(uint32_t)first_tri*3,first_vert,0 );
@@ -1304,7 +1305,8 @@ scene(scene),max_verts(mv>0?mv:1),max_tris(mt>0?mt:1),flags(f){
 	WGPUBufferDescriptor id={};
 	id.label=bbStrView( "bb.3d.mesh.indices" );
 	id.usage=WGPUBufferUsage_Index|WGPUBufferUsage_CopyDst;
-	id.size=(uint64_t)max_tris*3*sizeof( unsigned int );
+	index16=max_verts<=65536;
+	id.size=index16?(((uint64_t)max_tris*3*sizeof( uint16_t )+3)&~(uint64_t)3):(uint64_t)max_tris*3*sizeof( unsigned int );
 	index_buffer=wgpuDeviceCreateBuffer( scene->res->device,&id );
 }
 
@@ -1324,7 +1326,16 @@ void WebGPUMesh::unlock(){
 	}
 
 	wgpuQueueWriteBuffer( scene->res->queue,vertex_buffer,0,verts,(size_t)max_verts*sizeof( BBWebGPU3DVertex ) );
-	wgpuQueueWriteBuffer( scene->res->queue,index_buffer,0,tris,(size_t)max_tris*3*sizeof( unsigned int ) );
+	if( index16 ){
+		static std::vector<uint16_t> narrow;
+		size_t count=(size_t)max_tris*3;
+		narrow.resize( (count+1)&~(size_t)1 );
+		for( size_t i=0;i<count;i++ ) narrow[i]=(uint16_t)tris[i];
+		if( count&1 ) narrow[count]=0;
+		wgpuQueueWriteBuffer( scene->res->queue,index_buffer,0,narrow.data(),narrow.size()*sizeof( uint16_t ) );
+	}else{
+		wgpuQueueWriteBuffer( scene->res->queue,index_buffer,0,tris,(size_t)max_tris*3*sizeof( unsigned int ) );
+	}
 }
 
 

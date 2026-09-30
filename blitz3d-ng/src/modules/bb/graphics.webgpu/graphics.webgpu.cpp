@@ -462,9 +462,12 @@ void WebGPUContextResources::generateMips( WGPUTexture tex,int levels ){
 	ensureMipPipeline();
 	if( !mip_pipeline ) return;
 
-	WGPUCommandEncoderDescriptor edesc={};
-	edesc.label=bbStrView( "bb.mips.encoder" );
-	WGPUCommandEncoder enc=wgpuDeviceCreateCommandEncoder( device,&edesc );
+	if( !mip_encoder ){
+		WGPUCommandEncoderDescriptor edesc={};
+		edesc.label=bbStrView( "bb.mips.encoder" );
+		mip_encoder=wgpuDeviceCreateCommandEncoder( device,&edesc );
+	}
+	WGPUCommandEncoder enc=mip_encoder;
 
 	for( int level=1;level<levels;++level ){
 		WGPUTextureViewDescriptor sv={};
@@ -514,15 +517,6 @@ void WebGPUContextResources::generateMips( WGPUTexture tex,int levels ){
 		wgpuBindGroupRelease( group );
 		wgpuTextureViewRelease( src );
 		wgpuTextureViewRelease( dst );
-	}
-
-	WGPUCommandBufferDescriptor cdesc={};
-	cdesc.label=bbStrView( "bb.mips.commands" );
-	WGPUCommandBuffer commands=wgpuCommandEncoderFinish( enc,&cdesc );
-	wgpuCommandEncoderRelease( enc );
-	if( commands ){
-		wgpuQueueSubmit( queue,1,&commands );
-		wgpuCommandBufferRelease( commands );
 	}
 }
 
@@ -602,13 +596,31 @@ WGPURenderPassEncoder WebGPUContextResources::ensurePass( WebGPUCanvas *target )
 	return pass;
 }
 
+void WebGPUContextResources::resetPassState(){
+	pending_draw=false;
+	bound_pipeline=0;
+	bound_group=0;
+	bound_group_offset_valid=false;
+	bound_vertex_buffer=0;
+	bound_scissor_valid=false;
+}
+
+void WebGPUContextResources::flushPendingDraw(){
+	if( pending_draw&&pass ){
+		wgpuRenderPassEncoderDraw( pass,pending_count,1,pending_first,0 );
+	}
+	pending_draw=false;
+}
+
 void WebGPUContextResources::endPass(){
 	if( pass ){
+		flushPendingDraw();
 		wgpuRenderPassEncoderEnd( pass );
 		wgpuRenderPassEncoderRelease( pass );
 		pass=0;
 	}
 	pass_target=0;
+	resetPassState();
 }
 
 void WebGPUContextResources::flush(){
@@ -618,19 +630,31 @@ void WebGPUContextResources::flush(){
 	for( size_t i=0;i<listeners.size();++i ){
 		if( listeners[i].pre_flush ) listeners[i].pre_flush( listeners[i].ctx );
 	}
+	WGPUCommandBuffer buffers[2];
+	int nbuffers=0;
+	if( mip_encoder ){
+		WGPUCommandBufferDescriptor desc={};
+		desc.label=bbStrView( "bb.mips.commands" );
+		WGPUCommandBuffer commands=wgpuCommandEncoderFinish( mip_encoder,&desc );
+		wgpuCommandEncoderRelease( mip_encoder );
+		mip_encoder=0;
+		if( commands ) buffers[nbuffers++]=commands;
+	}
 	if( encoder ){
 		WGPUCommandBufferDescriptor desc={};
 		desc.label=bbStrView( "bb.commands" );
 		WGPUCommandBuffer commands=wgpuCommandEncoderFinish( encoder,&desc );
 		wgpuCommandEncoderRelease( encoder );
 		encoder=0;
-		if( commands ){
-			wgpuQueueSubmit( queue,1,&commands );
-			wgpuCommandBufferRelease( commands );
-		}
+		if( commands ) buffers[nbuffers++]=commands;
+	}
+	if( nbuffers ){
+		wgpuQueueSubmit( queue,nbuffers,buffers );
+		for( int i=0;i<nbuffers;i++ ) wgpuCommandBufferRelease( buffers[i] );
 	}
 	vertex_used=0;
 	uniform_used=0;
+	last_state_valid=false;
 }
 
 
@@ -722,6 +746,7 @@ void WebGPUContextResources::invalidateBindGroupsFor( WGPUTextureView view ){
 	std::map<std::pair<WGPUTextureView,WGPUSampler>,WGPUBindGroup>::iterator it=bind_groups.begin();
 	while( it!=bind_groups.end() ){
 		if( it->first.first==view ){
+			if( it->second==bound_group ) bound_group=0;
 			wgpuBindGroupRelease( it->second );
 			it=bind_groups.erase( it );
 		}else{
@@ -791,8 +816,20 @@ uint32_t WebGPUContextResources::pushUniforms( const BBWebGPURenderState &state 
 	return (uint32_t)offset;
 }
 
+uint32_t WebGPUContextResources::pushUniformsCached( const BBWebGPURenderState &state ){
+	if( last_state_valid&&memcmp( &last_state,&state,sizeof(state) )==0 ){
+		return last_state_offset;
+	}
+	uint32_t offset=pushUniforms( state );
+	last_state=state;
+	last_state_offset=offset;
+	last_state_valid=true;
+	return offset;
+}
+
 void WebGPUContextResources::destroy(){
 	endPass();
+	if( mip_encoder ){ wgpuCommandEncoderRelease( mip_encoder );mip_encoder=0; }
 	if( encoder ){ wgpuCommandEncoderRelease( encoder );encoder=0; }
 	releaseSurfaceTexture();
 
@@ -842,7 +879,7 @@ WebGPUGraphics::WebGPUGraphics( SDL_Window *wnd ):wnd(wnd),def_font(0),fb(0){
 	bbAppOnChange.add( onAppChange,this );
 
 	fb=d_new WebGPUCanvas( &res,BBCanvas::CANVAS_TEX_VIDMEM );
-	fb->useFloatFormat();
+	fb->useWideFormat();
 
 	front_canvas=fb;
 	back_canvas=fb;
@@ -1000,7 +1037,13 @@ BBCanvas *WebGPUGraphics::createCanvas( int width,int height,int flags ){
 	return canvas;
 }
 
+static double bb_load_ms=0;
+static int bb_load_count=0;
+static int bb_load_reported=0;
+static double bb_load_report_time=0;
+
 BBCanvas *WebGPUGraphics::loadCanvas( const std::string &file,int flags ){
+	double started=emscripten_get_now();
 	BBPixmap *pixmap=bbLoadPixmap( file );
 	if( !pixmap ) return 0;
 
@@ -1014,6 +1057,9 @@ BBCanvas *WebGPUGraphics::loadCanvas( const std::string &file,int flags ){
 	WebGPUCanvas *canvas=d_new WebGPUCanvas( &res,flags );
 	canvas->setPixmap( pixmap );
 	canvas_set.insert( canvas );
+
+	bb_load_ms+=emscripten_get_now()-started;
+	++bb_load_count;
 
 	return canvas;
 }
@@ -1107,6 +1153,15 @@ void WebGPUContextDriver::flip( bool vwait ){
 	if( !g ) return;
 
 	g->present();
+
+	if( bb_load_count!=bb_load_reported ){
+		double now=emscripten_get_now();
+		if( now-bb_load_report_time>=1000.0 ){
+			LOGD( "[perf] textures loaded=%d total=%.0fms",bb_load_count,bb_load_ms );
+			bb_load_reported=bb_load_count;
+			bb_load_report_time=now;
+		}
+	}
 
 	if( vwait || emscripten_get_now()-bb_last_raf_ms>=16.0 ){
 		bbWebGPURafYield();
