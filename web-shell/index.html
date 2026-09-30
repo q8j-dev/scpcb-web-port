@@ -163,18 +163,23 @@
       } catch (e) {}
 
       const SAVES_KEY = 'scpcb.saves';
-      const b64enc = (bytes) => { let s = ''; for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]); return btoa(s); };
+      const b64enc = (bytes) => {
+        let s = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        return btoa(s);
+      };
       const b64dec = (str) => { const s = atob(str); const b = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i); return b; };
+      // Collects every file under dir into out as path -> {size, mtime}.
       const walk = (dir, out) => {
         let names;
         try { names = FS.readdir(dir); } catch (e) { return; }
         for (const n of names) {
           if (n === '.' || n === '..') continue;
           const p = dir + '/' + n;
-          let mode;
-          try { mode = FS.stat(p).mode; } catch (e) { continue; }
-          if (FS.isDir(mode)) walk(p, out);
-          else if (FS.isFile(mode)) { try { out[p] = b64enc(FS.readFile(p)); } catch (e) {} }
+          let st;
+          try { st = FS.stat(p); } catch (e) { continue; }
+          if (FS.isDir(st.mode)) walk(p, out);
+          else if (FS.isFile(st.mode)) out[p] = st.size + ':' + +st.mtime;
         }
       };
       try { FS.mkdir('/Saves'); } catch (e) {}
@@ -188,18 +193,26 @@
           }
         }
       } catch (e) {}
-      let lastSaves = localStorage.getItem(SAVES_KEY) || '';
-      setInterval(() => {
+      // Only re-encode the saves when a file's size or mtime changed.
+      let lastSig = null;
+      const persistSaves = () => {
         try {
+          const files = {};
+          walk('/Saves', files);
+          const sig = JSON.stringify(files);
+          if (sig === lastSig) return;
           const out = {};
-          walk('/Saves', out);
-          const ser = JSON.stringify(out);
-          if (ser !== lastSaves && ser !== '{}') {
-            lastSaves = ser;
-            localStorage.setItem(SAVES_KEY, ser);
-          }
-        } catch (e) {}
-      }, 4000);
+          for (const p in files) out[p] = b64enc(FS.readFile(p));
+          if (sig !== '{}') localStorage.setItem(SAVES_KEY, JSON.stringify(out));
+          lastSig = sig;
+        } catch (e) {
+          console.warn('could not store saves (browser storage full?)', e);
+        }
+      };
+      lastSig = (() => { const f = {}; walk('/Saves', f); return JSON.stringify(f); })();
+      setInterval(persistSaves, 4000);
+      addEventListener('pagehide', persistSaves);
+      document.addEventListener('visibilitychange', () => { if (document.hidden) persistSaves(); });
     } ],
   };
 
@@ -231,21 +244,25 @@
         const manifest = await mf.json();
         const total = manifest.size;
         const buf = new Uint8Array(total);
-        let offset = 0, loaded = 0;
-        for (const part of manifest.parts) {
-          const r = await fetch(part, { cache: 'no-cache' });
-          if (!r.ok) throw new Error('chunk ' + part + ' failed');
-          const chunk = new Uint8Array(await r.arrayBuffer());
-          if (offset + chunk.length > total) {
-            throw new Error('asset package mismatch (stale cache?) - please hard-refresh (Cmd/Ctrl+Shift+R)');
+        let loaded = 0, next = 0;
+        const worker = async () => {
+          while (next < manifest.parts.length) {
+            const i = next++;
+            const r = await fetch(manifest.parts[i], { cache: 'no-cache' });
+            if (!r.ok) throw new Error('chunk ' + manifest.parts[i] + ' failed');
+            const chunk = new Uint8Array(await r.arrayBuffer());
+            const offset = i * manifest.chunkSize;
+            if (offset + chunk.length > total) {
+              throw new Error('asset package mismatch (stale cache?), please hard-refresh (Cmd/Ctrl+Shift+R)');
+            }
+            buf.set(chunk, offset);
+            loaded += chunk.length;
+            const pct = Math.floor((loaded / total) * 100);
+            barfill.style.width = pct + '%';
+            pctEl.textContent = pct + '%';
           }
-          buf.set(chunk, offset);
-          offset += chunk.length;
-          loaded += chunk.length;
-          const pct = Math.floor((loaded / total) * 100);
-          barfill.style.width = pct + '%';
-          pctEl.textContent = pct + '%';
-        }
+        };
+        await Promise.all(Array.from({ length: Math.min(4, manifest.parts.length) }, worker));
         Module.getPreloadedPackage = () => buf.buffer;
       }
     } catch (e) {
