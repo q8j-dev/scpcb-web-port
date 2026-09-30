@@ -96,7 +96,7 @@ public:
 		if( !frame_canvas ){
 			int ready=bbgpu_movie_ready( handle );
 			if( ready<0 ){ failed=true;return false; }
-			if( ready==0 ) return true; // still buffering metadata
+			if( ready==0 ) return true;
 
 			vid_w=bbgpu_movie_width( handle );
 			vid_h=bbgpu_movie_height( handle );
@@ -126,7 +126,7 @@ public:
 
 	bool isPlaying()const override{
 		if( failed ) return false;
-		if( !frame_canvas ) return true; // still buffering metadata
+		if( !frame_canvas ) return true;
 		return bbgpu_movie_ended( handle )==0;
 	}
 	int getWidth()const override{ return vid_w; }
@@ -380,6 +380,9 @@ void WebGPUContextResources::ensurePipelineObjects(){
 	ubdesc.size=uniform_capacity;
 	uniform_buffer=wgpuDeviceCreateBuffer( device,&ubdesc );
 	uniform_used=0;
+
+	vertex_stage.resize( vertex_capacity );
+	uniform_stage.resize( uniform_capacity );
 }
 
 
@@ -470,6 +473,8 @@ void WebGPUContextResources::endPass(){
 
 void WebGPUContextResources::flush(){
 	endPass();
+	if( vertex_used ) wgpuQueueWriteBuffer( queue,vertex_buffer,0,vertex_stage.data(),vertex_used );
+	if( uniform_used ) wgpuQueueWriteBuffer( queue,uniform_buffer,0,uniform_stage.data(),uniform_used );
 	if( encoder ){
 		WGPUCommandBufferDescriptor desc={};
 		desc.label=bbStrView( "bb.commands" );
@@ -623,10 +628,11 @@ uint32_t WebGPUContextResources::pushVertices( const BBWebGPUVertex *verts,int c
 			desc.size=cap;
 			vertex_buffer=wgpuDeviceCreateBuffer( device,&desc );
 			vertex_capacity=cap;
+			vertex_stage.resize( cap );
 		}
 	}
 
-	wgpuQueueWriteBuffer( queue,vertex_buffer,offset,verts,bytes );
+	memcpy( vertex_stage.data()+offset,verts,bytes );
 	vertex_used=offset+bytes;
 	return (uint32_t)offset;
 }
@@ -637,7 +643,7 @@ uint32_t WebGPUContextResources::pushUniforms( const BBWebGPURenderState &state 
 		flush();
 		offset=0;
 	}
-	wgpuQueueWriteBuffer( queue,uniform_buffer,offset,&state,sizeof( state ) );
+	memcpy( uniform_stage.data()+offset,&state,sizeof( state ) );
 	uniform_used=offset+256;
 	return (uint32_t)offset;
 }
@@ -684,7 +690,7 @@ void WebGPUGraphics::onAppChange( void *data,void *context ){
 }
 
 WebGPUGraphics::WebGPUGraphics( SDL_Window *wnd ):wnd(wnd),def_font(0),fb(0){
-	for( int k=0;k<256;++k ) gamma_red[k]=gamma_green[k]=gamma_blue[k]=k;
+	for( int k=0;k<256;++k ) gamma_red[k]=gamma_green[k]=gamma_blue[k]=k*257;
 
 	bbAppOnChange.add( onAppChange,this );
 
@@ -817,7 +823,7 @@ void WebGPUGraphics::setGamma( int r,int g,int b,float dr,float dg,float db ){
 }
 
 void WebGPUGraphics::getGamma( int r,int g,int b,float *dr,float *dg,float *db ){
-	*dr=gamma_red[r&255];*dg=gamma_green[g&255];*db=gamma_blue[b&255];
+	*dr=gamma_red[r&255]/257.0f;*dg=gamma_green[g&255]/257.0f;*db=gamma_blue[b&255]/257.0f;
 }
 
 void WebGPUGraphics::updateGamma( bool calibrate ){

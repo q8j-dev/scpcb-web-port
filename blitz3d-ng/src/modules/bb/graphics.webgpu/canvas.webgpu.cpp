@@ -13,7 +13,7 @@ WebGPUCanvas::WebGPUCanvas( WebGPUContextResources *res,int w,int h,int f ):
 	res(res),width(w),height(h),pixels(0),lock_count(0),font(0),
 	scale_x(1.0f),scale_y(1.0f),origin_x(0),origin_y(0),handle_x(0),handle_y(0),
 	mask(0),pixmap(0),dirty(false),pixmap_stale(false),clear_pending(false),
-	gpu_written(false),is_surface(false),cube_face(0),cube_mode(0),
+	gpu_written(false),is_surface(false),hit_valid(false),cube_face(0),cube_mode(0),
 	texture(0),twidth(0),theight(0),texture_view(0){
 	flags=f;
 
@@ -327,6 +327,7 @@ void WebGPUCanvas::setPixmap( BBPixmap *pm ){
 	if( pixmap ) delete pixmap;
 	pixmap=pm;
 	pixmap_stale=false;
+	hit_valid=false;
 
 	width=pm->width;
 	height=pm->height;
@@ -383,6 +384,7 @@ void WebGPUCanvas::draw2d( WGPUPrimitiveTopology topology,bool blend,WGPUTexture
 
 	pixmap_stale=true;
 	gpu_written=true;
+	hit_valid=false;
 }
 
 void WebGPUCanvas::quad( int x,int y,int w,int h,bool solid,bool blend,
@@ -419,6 +421,7 @@ void WebGPUCanvas::cls(){
 		res->ensurePass( this );
 		pixmap_stale=true;
 		gpu_written=true;
+		hit_valid=false;
 	}else{
 		float col[3]={ cls_color[0],cls_color[1],cls_color[2] };
 		float xywh[4]={ (float)vx,(float)vy,(float)vw,(float)vh };
@@ -759,13 +762,80 @@ void WebGPUCanvas::image( BBCanvas *c,int x,int y,bool solid ){
 	quad( x-src->handle_x,y-src->handle_y,src->getWidth(),src->getHeight(),true,true,view,white );
 }
 
-bool WebGPUCanvas::collide( int x,int y,const BBCanvas *src,int src_x,int src_y,bool solid ){
-	RTEX( "WebGPUCanvas::collide not implemented" );
+void WebGPUCanvas::readPixels( std::vector<unsigned char> &out ){
+	out.resize( (size_t)width*height*4 );
+	if( pixmap && pixmap->bits && !pixmap_stale && pixmap->bpp==4 &&
+	    pixmap->width==width && pixmap->height==height ){
+		memcpy( out.data(),pixmap->bits,out.size() );
+		return;
+	}
+	if( !readbackInto( out.data() ) ) std::fill( out.begin(),out.end(),0 );
+}
+
+bool WebGPUCanvas::buildHitMask(){
+	if( width<=0 || height<=0 ) return false;
+	if( hit_valid ) return true;
+
+	std::vector<unsigned char> rgba;
+	readPixels( rgba );
+
+	bool keyed=( flags&CANVAS_TEX_MASK )!=0;
+	unsigned char kr=(mask>>16)&255,kg=(mask>>8)&255,kb=mask&255;
+
+	hit_mask.assign( (size_t)width*height,0 );
+	for( size_t i=0;i<hit_mask.size();i++ ){
+		const unsigned char *p=&rgba[i*4];
+		bool visible=p[3]!=0;
+		if( keyed && p[0]==kr && p[1]==kg && p[2]==kb ) visible=false;
+		hit_mask[i]=visible?1:0;
+	}
+	hit_valid=true;
+	return true;
+}
+
+bool WebGPUCanvas::collide( int x,int y,const BBCanvas *s,int src_x,int src_y,bool solid ){
+	WebGPUCanvas *other=(WebGPUCanvas*)s;
+
+	int x1=x-handle_x,y1=y-handle_y;
+	int x2=src_x-other->handle_x,y2=src_y-other->handle_y;
+
+	if( x1+width<=x2 || x1>=x2+other->width ) return false;
+	if( y1+height<=y2 || y1>=y2+other->height ) return false;
+	if( solid ) return true;
+
+	if( !buildHitMask() || !other->buildHitMask() ) return false;
+
+	int left=std::max( x1,x2 ),right=std::min( x1+width,x2+other->width );
+	int top=std::max( y1,y2 ),bottom=std::min( y1+height,y2+other->height );
+
+	for( int py=top;py<bottom;py++ ){
+		const unsigned char *a=hit_mask.data()+(ptrdiff_t)(py-y1)*width-x1;
+		const unsigned char *b=other->hit_mask.data()+(ptrdiff_t)(py-y2)*other->width-x2;
+		for( int px=left;px<right;px++ ){
+			if( a[px] && b[px] ) return true;
+		}
+	}
 	return false;
 }
 
 bool WebGPUCanvas::rect_collide( int x,int y,int rect_x,int rect_y,int rect_w,int rect_h,bool solid ){
-	RTEX( "WebGPUCanvas::rect_collide not implemented" );
+	int x1=x-handle_x,y1=y-handle_y;
+
+	if( x1+width<=rect_x || x1>=rect_x+rect_w ) return false;
+	if( y1+height<=rect_y || y1>=rect_y+rect_h ) return false;
+	if( solid ) return true;
+
+	if( !buildHitMask() ) return false;
+
+	int left=std::max( x1,rect_x ),right=std::min( x1+width,rect_x+rect_w );
+	int top=std::max( y1,rect_y ),bottom=std::min( y1+height,rect_y+rect_h );
+
+	for( int py=top;py<bottom;py++ ){
+		const unsigned char *a=hit_mask.data()+(ptrdiff_t)(py-y1)*width-x1;
+		for( int px=left;px<right;px++ ){
+			if( a[px] ) return true;
+		}
+	}
 	return false;
 }
 
@@ -795,11 +865,11 @@ void WebGPUCanvas::setPixelFast( int x,int y,unsigned argb ){
 }
 
 void WebGPUCanvas::copyPixel( int x,int y,BBCanvas *src,int src_x,int src_y ){
-	RTEX( "WebGPUCanvas::copyPixel not implemented" );
+	setPixel( x,y,src->getPixel( src_x,src_y ) );
 }
 
 void WebGPUCanvas::copyPixelFast( int x,int y,BBCanvas *src,int src_x,int src_y ){
-	RTEX( "WebGPUCanvas::copyPixelFast not implemented" );
+	setPixelFast( x,y,src->getPixelFast( src_x,src_y ) );
 }
 
 unsigned WebGPUCanvas::getPixel( int x,int y ){
@@ -819,6 +889,7 @@ void WebGPUCanvas::unlock(){
 	if( !pixels ) return;
 	if( --lock_count>0 ) return;
 	if( lock_count<0 ) lock_count=0;
+	hit_valid=false;
 	uploadData();
 	delete[] pixels;pixels=0;
 }
@@ -840,6 +911,7 @@ void WebGPUCanvas::setMask( unsigned argb ){
 	flags|=CANVAS_TEX_MASK;
 	syncPixmapFromTexture();
 	dirty=true;
+	hit_valid=false;
 }
 
 void WebGPUCanvas::setColor( unsigned argb ){
@@ -875,7 +947,7 @@ void WebGPUCanvas::setViewport( int x,int y,int w,int h ){
 }
 
 void WebGPUCanvas::setCubeMode( int mode ){
-	RTEX( "WebGPUCanvas::setCubeMode not implemented" );
+	cube_mode=mode;
 }
 
 void WebGPUCanvas::setCubeFace( int face ){

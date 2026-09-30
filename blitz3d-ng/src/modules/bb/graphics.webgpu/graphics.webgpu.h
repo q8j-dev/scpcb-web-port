@@ -73,6 +73,7 @@ struct WebGPUContextResources{
 	size_t vertex_capacity=0,vertex_used=0;
 	WGPUBuffer uniform_buffer=0;
 	size_t uniform_capacity=0,uniform_used=0;
+	std::vector<unsigned char> vertex_stage,uniform_stage;
 
 	WGPUCommandEncoder encoder=0;
 	WGPURenderPassEncoder pass=0;

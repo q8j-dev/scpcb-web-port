@@ -32,6 +32,12 @@ protected:
 
 	bool is_surface;
 
+	std::vector<unsigned char> hit_mask;
+	bool hit_valid;
+
+	bool buildHitMask();
+	void readPixels( std::vector<unsigned char> &out );
+
 	void draw2d( WGPUPrimitiveTopology topology,bool blend,WGPUTextureView tex,
 	             WGPUSampler sampler,const float xywh[4],const float col[3],
 	             const float scale[2],const BBWebGPUVertex *verts,int nverts );
