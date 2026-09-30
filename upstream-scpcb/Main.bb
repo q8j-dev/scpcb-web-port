@@ -12387,7 +12387,7 @@ Function PlayMovie(moviefile$)
 End Function
 
 Function PlayStartupVideos()
-	If GetOptionInt("general","play startup video") = 0 LorHasCLIFlag("novid") Then Return
+	If GetOptionInt("general","play startup video") = 0 Lor HasCLIFlag("novid") Then Return
 
 	PlayMovie("GFX\menu\startup_Undertow")
 	PlayMovie("GFX\menu\startup_TSS")
