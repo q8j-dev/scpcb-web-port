@@ -359,6 +359,8 @@ ENDIF ()
 set(CMAKE_UNITY_BUILD true)
 
 function(file_write_changes path src)
+  get_filename_component(path "${path}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+
   set(changed true)
   if(EXISTS ${path})
     file(READ ${path} prev_src)

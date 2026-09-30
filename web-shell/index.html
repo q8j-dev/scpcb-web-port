@@ -564,10 +564,19 @@
 
     const build = manifest.builds[variant];
     Module.locateFile = (path, dir) => path.endsWith('.wasm') ? build.wasm : dir + path;
-    const s = document.createElement('script');
-    s.async = true;
-    s.src = build.js;
-    document.body.appendChild(s);
+    const loadScript = (src) => new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('could not load ' + src));
+      s.src = src;
+      document.body.appendChild(s);
+    });
+    try {
+      await loadScript(manifest.loader);
+      await loadScript(build.js);
+    } catch (e) {
+      fail('Failed to start the game: ' + e.message);
+    }
   })();
 </script>
 </body>
