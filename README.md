@@ -29,4 +29,4 @@ The game is built twice. The `jspi` build uses JavaScript Promise Integration an
 python3 build.py --serve
 ```
 
-Then open http://127.0.0.1:8090/ in a browser that supports WebGPU. Chrome and Edge work best. Alt+Enter toggles fullscreen. The 300 MB of game data is stored in the browser after the first load, so later visits skip the download.
+Then open http://127.0.0.1:8090/ in a browser that supports WebGPU. Chrome and Edge work best. The page asks for a resolution before it loads the game and remembers your last choice. Alt+Enter toggles fullscreen. The 300 MB of game data is stored in the browser after the first load, so later visits skip the download.
