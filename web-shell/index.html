@@ -286,6 +286,37 @@
     setTimeout(() => fail('The game stopped.\n' + stopLines.join('\n').slice(0, 600)), 300);
   }
 
+  const gpuStats = { draws: 0, submits: 0, frames: 0 };
+  let lastSecond = { draws: 0, submits: 0, frames: 0 };
+  let idleSeconds = 0;
+
+  function watchGpu() {
+    if (typeof GPURenderPassEncoder === 'undefined') return;
+    for (const name of ['draw', 'drawIndexed']) {
+      const original = GPURenderPassEncoder.prototype[name];
+      GPURenderPassEncoder.prototype[name] = function (...args) { gpuStats.draws++; return original.apply(this, args); };
+    }
+    const submit = GPUQueue.prototype.submit;
+    GPUQueue.prototype.submit = function (...args) { gpuStats.submits++; return submit.apply(this, args); };
+    const tick = () => { gpuStats.frames++; requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+
+    setInterval(() => {
+      lastSecond = { ...gpuStats };
+      gpuStats.draws = gpuStats.submits = gpuStats.frames = 0;
+      const running = loading.style.display === 'none';
+      idleSeconds = running && lastSecond.frames > 10 && lastSecond.draws === 0 ? idleSeconds + 1 : 0;
+      if (idleSeconds === 3) console.warn('[shell] the game has drawn nothing for 3 seconds', window.scpcbStats());
+    }, 1000);
+  }
+
+  window.scpcbStats = () => ({
+    lastSecond,
+    canvas: [canvas.width, canvas.height],
+    visibility: document.visibilityState,
+    focused: document.hasFocus(),
+  });
+
   const isWasmFailure = (e) => e instanceof WebAssembly.RuntimeError || e instanceof RangeError;
   addEventListener('error', (ev) => { if (isWasmFailure(ev.error)) fail('The game stopped.\n' + ev.error.message); });
   addEventListener('unhandledrejection', (ev) => { if (isWasmFailure(ev.reason)) fail('The game stopped.\n' + ev.reason.message); });
@@ -460,6 +491,7 @@
       return;
     }
     Module.onAbort = (w) => fail('Startup failed: ' + w);
+    watchGpu();
 
     const resolution = await chooseResolution();
 

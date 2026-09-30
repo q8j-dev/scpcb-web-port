@@ -261,13 +261,10 @@ Else
 EndIf
 
 Global MenuScale# = CalculateMenuScale()
-Global HUDScale# = Max(MenuScale * HUDScaleFactor, 1)
+Global HUDScale# = MenuScale * HUDScaleFactor
 
 Function CalculateMenuScale#()
-	Local short% = Min(GraphicWidth, GraphicHeight)
-	If short > 1024 Then Return short / 1024.0
-	If short > 840 Then Return 1
-	Return short / 840.0
+	Return Min(GraphicWidth, GraphicHeight) / 1024.0
 End Function
 
 SetBuffer(BackBuffer())
