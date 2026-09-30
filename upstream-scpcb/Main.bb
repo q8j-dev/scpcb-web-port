@@ -178,6 +178,7 @@ Global fresize_cam%
 Global ShowFPS = GetOptionInt("graphics", "show FPS")
 
 Global WireframeState
+Global FullBright%
 Global HalloweenTex
 Global IsBirthday = Left(CurrentDate(), 7) = "15 Apr " Lor HasCLIFlag("birthday")
 Global BirthdayHat = False
@@ -742,6 +743,7 @@ Function UpdateConsole()
 							CreateConsoleMsg("LIST OF COMMANDS - PAGE 3/3")
 							CreateConsoleMsg("******************************")
 							CreateConsoleMsg("- wireframe")
+							CreateConsoleMsg("- fullbright")
 							CreateConsoleMsg("- showfps")
 							CreateConsoleMsg("- debughud")
 							CreateConsoleMsg("- camerafog [near] [far]")
@@ -803,6 +805,14 @@ Function UpdateConsole()
 							CreateConsoleMsg("is specified (on/off).")
 							CreateConsoleMsg("Allows only the edges of geometry to be rendered,")
 							CreateConsoleMsg("making everything else transparent.")
+							CreateConsoleMsg("******************************")
+						Case "fullbright"
+							CreateConsoleMsg("HELP - fullbright")
+							CreateConsoleMsg("******************************")
+							CreateConsoleMsg("Toggles fullbright, unless a valid parameter")
+							CreateConsoleMsg("is specified (on/off).")
+							CreateConsoleMsg("Lights everything at full brightness and")
+							CreateConsoleMsg("removes the fog.")
 							CreateConsoleMsg("******************************")
 						Case "spawnitem"
 							CreateConsoleMsg("HELP - spawnitem")
@@ -1330,6 +1340,25 @@ Function UpdateConsole()
 					EndIf
 					
 					DropSpeed = 0
+					;[End Block]
+				Case "fullbright"
+					;[Block]
+					StrTemp$ = Lower(Right(ConsoleInput, Len(ConsoleInput) - Instr(ConsoleInput, " ")))
+
+					Select StrTemp
+						Case "on", "1", "true"
+							FullBright = True
+						Case "off", "0", "false"
+							FullBright = False
+						Default
+							FullBright = Not FullBright
+					End Select
+
+					If FullBright Then
+						CreateConsoleMsg("FULLBRIGHT ON")
+					Else
+						CreateConsoleMsg("FULLBRIGHT OFF")
+					EndIf
 					;[End Block]
 				Case "showfps"
 					;[Block]
@@ -11870,9 +11899,15 @@ Function RenderWorld2()
 		EndIf
 	EndIf
 	
+	If FullBright Then
+		AmbientLight 255,255,255
+		CameraFogMode Camera,0
+		CameraRange Camera, 0.05, 60
+	EndIf
+
 	IsNVGBlinking% = False
 	HideEntity NVBlink
-	
+
 	CameraViewport Camera,0,0,GraphicWidth,GraphicHeight
 	
 	Local hasBattery% = 2
