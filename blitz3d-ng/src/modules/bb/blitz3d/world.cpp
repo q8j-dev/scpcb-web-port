@@ -477,7 +477,7 @@ void World::render( Model *mod,const RenderContext &rc,bool defer ){
 	bool trans=mod->render( rc );
 
 	if( mod->queueSize( Model::QUEUE_OPAQUE ) ){
-		if( defer ){
+		if( defer&&mod->deferrable() ){
 			mod->takeQueue( Model::QUEUE_OPAQUE,opaque_draws );
 		}else{
 			if( mod->getRenderSpace()==Model::RENDER_SPACE_LOCAL ){

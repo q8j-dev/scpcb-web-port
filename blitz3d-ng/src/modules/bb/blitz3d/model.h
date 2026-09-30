@@ -51,6 +51,7 @@ public:
 	virtual void setRenderBrush( const Brush &b ){}
 	virtual bool render( const RenderContext &rc ){ return false; }
 	virtual void renderQueue( int type );
+	virtual bool deferrable()const{ return false; }
 
 	void takeQueue( int type,std::vector<Draw> &out );
 	static void drawQueued( const Draw &d );

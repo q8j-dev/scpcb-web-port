@@ -23,6 +23,7 @@ public:
 	virtual void setRenderBrush( const Brush &b );
 	virtual bool render( const RenderContext &rc );
 	virtual void renderQueue( int type );
+	virtual bool deferrable()const{ return surf_bones.empty(); }
 
 	void createBones();
 
