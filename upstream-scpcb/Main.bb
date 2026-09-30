@@ -12389,6 +12389,7 @@ End Function
 Function PlayStartupVideos()
 	If GetOptionInt("general","play startup video") = 0 Lor HasCLIFlag("novid") Then Return
 
+	PlayMovie("GFX\menu\startup_q8j")
 	PlayMovie("GFX\menu\startup_Undertow")
 	PlayMovie("GFX\menu\startup_TSS")
 End Function
