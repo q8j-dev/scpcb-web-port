@@ -1,29 +1,25 @@
-# SCP: Containment Breach - Web Port
+# SCP: Containment Breach (Web)
 
-Running SCP: Containment Breach in the browser. No native install, WebAssembly + WebGPU.
+SCP: Containment Breach running in your browser. No install, just WebAssembly and WebGPU.
 
-Play it live: **https://q8j-dev.github.io/scpcb-web-port/**.
+**Play it:** https://q8j-dev.github.io/scpcb-web-port/
 
-The game is written in Blitz3D BASIC, an old Windows-only game-dev language from the early 2000s. Instead of reimplementing the game logic, this compiles the actual unmodified `.bb` source through [blitz3d-ng](https://github.com/blitz3d-ng/blitz3d-ng), a cross-platform LLVM-backed reimplementation of the Blitz3D compiler and runtime that targets emscripten. That project is what makes this possible at all. Without it there's no way to run Blitz3D code outside a 32-bit Windows binary.
+The game itself is untouched. It's built with [blitz3d-ng](https://github.com/blitz3d-ng/blitz3d-ng), and this repo adds a WebGPU renderer to it (`blitz3d-ng/src/modules/bb/graphics.webgpu`) plus a few fixes.
 
-This repo adds a WebGPU rendering backend to blitz3d-ng (`blitz3d-ng/src/modules/bb/graphics.webgpu`) plus a handful of fixes. Everything else, meaning the actual game, is the community's and untouched.
+## What's here
 
-## Layout
-
-- `upstream-scpcb/` - the game source (Blitz3D BASIC), checked out from the community-maintained fork.
-- `blitz3d-ng/` - the compiler and runtime. Mostly vendored as-is, with the WebGPU backend and a few fixes added here.
-- `web-shell/`, `engine/`, `tools/` - the glue. HTML/JS shell that boots the compiled game, a small native helper linked into the build, and asset packaging scripts.
-- `webgame/` - build output, not checked in.
+- `upstream-scpcb/` the game source
+- `blitz3d-ng/` the compiler and runtime, with the WebGPU backend added
+- `web-shell/`, `engine/`, `tools/` the page that boots the game, a small native helper, and the packaging scripts
+- `webgame/` build output (not checked in)
 
 ## Building
 
-blitz3d-ng's own dependencies (LLVM, zlib, libpng, SDL, etc) aren't checked into this repo, they're pulled in the first time you build. You'll need CMake, Ninja, Python 3, and the [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html) installed and activated first.
+You need CMake, Ninja, Python 3 and the [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html) (activated). Then fetch the dependencies:
 
 ```
 python3 tools/fetch_blitz3d_ng_deps.py
 ```
-
-Two things get built after that: the native `blitzcc` compiler that turns the `.bb` source into the game, and the WebGPU runtime libraries (cross-compiled to wasm32 via emscripten, linked into the final game).
 
 **macOS:**
 ```
@@ -60,19 +56,17 @@ python build_game_webgpu.py
 
 `pack_monolith.py`, `build_game_webgpu.py` and `fetch_blitz3d_ng_deps.py` are plain Python, same commands on every platform. No bash, no WSL, no Git Bash required.
 
-### Running it
+The Python scripts work the same on every platform.
+
+## Running it
 
 ```
 cd webgame
 python3 -m http.server 8090
 ```
 
-Open `http://127.0.0.1:8090/` in a WebGPU-capable browser (Chrome/Edge stable, Firefox/Safari support varies). `localhost` counts as a secure context so there's no HTTPS setup needed locally.
+Open `http://127.0.0.1:8090/` in a browser with WebGPU (Chrome or Edge works best; Firefox and Safari vary).
 
 ## Status
 
-Playable end to end. Menus, saving, the full facility, audio, subtitles all work. Still occasionally finding a rendering edge case where the original native engine did something this reimplementation doesn't quite match.
-
-## Why
-
-Because "can this run in a browser" turned out to be a more interesting question than it looked, and nobody else had answered it for this particular game.
+Playable start to finish: menus, saving, the whole facility, audio and subtitles. Some rendering edge cases still don't match the original engine.
