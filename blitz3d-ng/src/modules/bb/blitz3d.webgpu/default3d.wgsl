@@ -183,7 +183,7 @@ fn vs_main( @location(0) bbPosition : vec3<f32>,
 
   v.fog_factor = 0.0;
   if( RS.fog_mode==FOG_LINEAR ){
-    v.fog_factor = fogFactorLinear( length( eye_pos.xyz ), RS.fog_range.x, RS.fog_range.y );
+    v.fog_factor = fogFactorLinear( abs( eye_pos.z ), RS.fog_range.x, RS.fog_range.y );
   }
 
   return v;
