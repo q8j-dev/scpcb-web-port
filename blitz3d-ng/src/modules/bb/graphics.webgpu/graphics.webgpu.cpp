@@ -475,6 +475,9 @@ void WebGPUContextResources::flush(){
 	endPass();
 	if( vertex_used ) wgpuQueueWriteBuffer( queue,vertex_buffer,0,vertex_stage.data(),vertex_used );
 	if( uniform_used ) wgpuQueueWriteBuffer( queue,uniform_buffer,0,uniform_stage.data(),uniform_used );
+	for( size_t i=0;i<listeners.size();++i ){
+		if( listeners[i].pre_flush ) listeners[i].pre_flush( listeners[i].ctx );
+	}
 	if( encoder ){
 		WGPUCommandBufferDescriptor desc={};
 		desc.label=bbStrView( "bb.commands" );

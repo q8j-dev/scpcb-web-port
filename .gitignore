@@ -5,3 +5,4 @@ blitz3d-ng/_release_webgpu/
 blitz3d-ng/deps/*/tree/
 blitz3d-ng/deps/crossguid/src/
 blitz3d-ng/deps/freeimage/src/
+blitz3d-ng/src/modules/bb/*/*.wgsl.h

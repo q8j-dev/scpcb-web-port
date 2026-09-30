@@ -39,8 +39,10 @@ struct BBWebGPUEntityState{
 	int32_t fullbright;
 	int32_t fog_mode;
 	int32_t alpha_test;
+	float alpha_ref;
+	float _pad[3];
 };
-static_assert( sizeof(BBWebGPUEntityState)==848,"BBEntityState layout mismatch" );
+static_assert( sizeof(BBWebGPUEntityState)==864,"BBEntityState layout mismatch" );
 
 struct BBWebGPUClearState{
 	float color[4];

@@ -37,6 +37,7 @@ struct BBEntityState {
   fullbright : i32,
   fog_mode : i32,
   alpha_test : i32,
+  alpha_ref : f32,
 };
 
 @group(0) @binding(0) var<uniform> FS : BBFrameState;
@@ -99,6 +100,9 @@ struct BBVertexOut {
 
 fn layerCoord( i : i32, eye_normal : vec3<f32>, ndc : vec3<f32>,
                uv0 : vec2<f32>, uv1 : vec2<f32> ) -> vec2<f32> {
+  if( i>=RS.texs_used ){
+    return vec2<f32>( 0.0 );
+  }
   var coord : vec2<f32>;
   if( RS.texs[i].sphere_map==1 ){
     coord = sphereMap( eye_normal, ndc );
@@ -243,7 +247,7 @@ fn fs_main( v : BBVertexOut ) -> @location(0) vec4<f32> {
     color = mix( color, fog_color, v.fog_factor );
   }
 
-  if( RS.alpha_test==1 && color.a==0.0 ){
+  if( RS.alpha_test==1 && color.a*255.0<=RS.alpha_ref ){
     discard;
   }
 

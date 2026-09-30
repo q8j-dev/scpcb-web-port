@@ -192,7 +192,8 @@ private:
 	std::map<uint32_t,WGPURenderPipeline> clear_pipelines;
 
 	WGPUBuffer uniform_buffer=0;
-	size_t uniform_capacity=0,uniform_used=0;
+	size_t uniform_capacity=0,uniform_used=0,uniform_uploaded=0;
+	std::vector<unsigned char> uniform_stage;
 	WGPUBindGroup frame_group=0,entity_group=0,clear_group=0;
 
 	std::map<std::array<uintptr_t,16>,WGPUBindGroup> tex_groups;
@@ -221,6 +222,17 @@ private:
 	}
 	static void canvasGoneThunk( void *ctx,WebGPUCanvas *canvas ){
 		((WebGPUScene*)ctx)->onCanvasGone( canvas );
+	}
+	static void preFlushThunk( void *ctx ){
+		((WebGPUScene*)ctx)->uploadStagedUniforms();
+	}
+
+	void uploadStagedUniforms(){
+		if( uniform_used>uniform_uploaded ){
+			wgpuQueueWriteBuffer( res->queue,uniform_buffer,uniform_uploaded,
+			                      uniform_stage.data()+uniform_uploaded,uniform_used-uniform_uploaded );
+			uniform_uploaded=uniform_used;
+		}
 	}
 
 	void onViewGone( WGPUTextureView view ){
@@ -282,6 +294,7 @@ public:
 		l.ctx=this;
 		l.view_gone=viewGoneThunk;
 		l.canvas_gone=canvasGoneThunk;
+		l.pre_flush=preFlushThunk;
 		res->addListener( l );
 	}
 
@@ -425,6 +438,8 @@ public:
 		bd.size=uniform_capacity;
 		uniform_buffer=wgpuDeviceCreateBuffer( res->device,&bd );
 		uniform_used=0;
+		uniform_uploaded=0;
+		uniform_stage.resize( uniform_capacity );
 
 		{
 			WGPUBindGroupEntry e={};
@@ -671,7 +686,7 @@ public:
 			flushAll();
 			offset=0;
 		}
-		wgpuQueueWriteBuffer( res->queue,uniform_buffer,offset,data,size );
+		memcpy( uniform_stage.data()+offset,data,size );
 		uniform_used=offset+size;
 		return (uint32_t)offset;
 	}
@@ -689,6 +704,7 @@ public:
 		endPass();
 		res->flush();
 		uniform_used=0;
+		uniform_uploaded=0;
 		++submit_marker;
 		frame_dirty=true;
 		entity_dirty=true;
@@ -946,8 +962,10 @@ public:
 		int alpha_test;
 		if( rs.fx&FX_ALPHATEST && !(rs.fx&FX_VERTEXALPHA) ){
 			alpha_test=1;
+			entity.alpha_ref=128.0f*rs.alpha;
 		}else{
 			alpha_test=0;
+			entity.alpha_ref=0.0f;
 		}
 
 		entity.fog_mode=(rs.fx&FX_NOFOG)?FOG_NONE:fog_mode;
