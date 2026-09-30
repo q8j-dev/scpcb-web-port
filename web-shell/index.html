@@ -61,9 +61,30 @@
     } catch (e) {}
   };
   const epl = document.exitPointerLock ? document.exitPointerLock.bind(document) : null;
+  let gameReleasedLock = false;
+  let lastRealEscape = 0;
+
   document.exitPointerLock = function(){
+    if (document.pointerLockElement) gameReleasedLock = true;
     try { if (epl) epl(); } catch (e) {}
   };
+
+  addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && e.isTrusted) lastRealEscape = performance.now();
+  }, true);
+
+  function pressEscape() {
+    const init = { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true };
+    document.dispatchEvent(new KeyboardEvent('keydown', init));
+    setTimeout(() => document.dispatchEvent(new KeyboardEvent('keyup', init)), 60);
+  }
+
+  document.addEventListener('pointerlockchange', () => {
+    if (document.pointerLockElement === canvas) return;
+    if (gameReleasedLock) { gameReleasedLock = false; return; }
+    if (performance.now() - lastRealEscape < 300) return;
+    pressEscape();
+  });
 
   const DB_NAME = 'scpcb';
   const DB_STORE = 'kv';
