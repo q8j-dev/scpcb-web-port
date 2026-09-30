@@ -183,6 +183,27 @@ private:
 	uint32_t frame_offset=0,entity_offset=0;
 
 	std::vector<WebGPULight*> lights;
+	float light_world[8][16];
+
+	void updateLightsEye(){
+		const float rot_y=cosf( 1.5708f ),rot_z=-sinf( 1.5708f );
+		for( int i=0;i<frame.lights_used;i++ ){
+			float mv[16];
+			bbMat4Mul( frame.view,light_world[i],mv );
+
+			float d[3];
+			for( int k=0;k<3;k++ ) d[k]=mv[4+k]*rot_y+mv[8+k]*rot_z;
+			float len=sqrtf( d[0]*d[0]+d[1]*d[1]+d[2]*d[2] );
+			if( len>0.0f ){ d[0]/=len;d[1]/=len;d[2]/=len; }
+			frame.lights[i].dir[0]=d[0];frame.lights[i].dir[1]=d[1];frame.lights[i].dir[2]=d[2];frame.lights[i].dir[3]=0.0f;
+
+			const float *w=light_world[i];
+			for( int k=0;k<3;k++ ){
+				frame.lights[i].pos[k]=frame.view[0+k]*w[12]+frame.view[4+k]*w[13]+frame.view[8+k]*w[14]+frame.view[12+k];
+			}
+			frame.lights[i].pos[3]=1.0f;
+		}
+	}
 
 	WGPUShaderModule shader=0;
 	WGPUBindGroupLayout bgl_frame=0,bgl_entity=0,bgl_textures=0,bgl_clear=0;
@@ -1074,7 +1095,7 @@ public:
 		memset( frame.lights,0,sizeof(frame.lights) );
 		frame.lights_used=0;
 		for( unsigned long i=0;i<8&&i<lights.size();i++ ){
-			memcpy( frame.lights[i].mat,lights[i]->matrix,sizeof(frame.lights[i].mat) );
+			memcpy( light_world[i],lights[i]->matrix,sizeof(light_world[i]) );
 			frame.lights[i].color[0]=lights[i]->r;
 			frame.lights[i].color[1]=lights[i]->g;
 			frame.lights[i].color[2]=lights[i]->b;
@@ -1133,6 +1154,7 @@ public:
 
 		for( int attempt=0;attempt<4;++attempt ){
 			if( frame_dirty ){
+				updateLightsEye();
 				frame_offset=pushUniforms( &frame,sizeof(frame) );
 				frame_dirty=false;
 			}

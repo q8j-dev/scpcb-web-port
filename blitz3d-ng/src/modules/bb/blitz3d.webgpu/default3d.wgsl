@@ -3,7 +3,8 @@ const FOG_NONE : i32 = 0;
 const FOG_LINEAR : i32 = 1;
 
 struct BBLightData {
-  tform : mat4x4<f32>,
+  dir : vec4<f32>,
+  pos : vec4<f32>,
   color : vec4<f32>,
   params : vec4<f32>,
 };
@@ -62,19 +63,6 @@ struct BBEntityState {
 
 fn mat3of( m : mat4x4<f32> ) -> mat3x3<f32> {
   return mat3x3<f32>( m[0].xyz, m[1].xyz, m[2].xyz );
-}
-
-fn rotationMatrix( axis_in : vec3<f32>, angle : f32 ) -> mat4x4<f32> {
-  let axis = normalize( axis_in );
-  let s = sin( angle );
-  let c = cos( angle );
-  let oc = 1.0 - c;
-
-  return mat4x4<f32>(
-    vec4<f32>( oc*axis.x*axis.x + c,          oc*axis.x*axis.y - axis.z*s,  oc*axis.z*axis.x + axis.y*s,  0.0 ),
-    vec4<f32>( oc*axis.x*axis.y + axis.z*s,   oc*axis.y*axis.y + c,         oc*axis.y*axis.z - axis.x*s,  0.0 ),
-    vec4<f32>( oc*axis.z*axis.x - axis.y*s,   oc*axis.y*axis.z + axis.x*s,  oc*axis.z*axis.z + c,         0.0 ),
-    vec4<f32>( 0.0, 0.0, 0.0, 1.0 ) );
 }
 
 fn fogFactorLinear( dist : f32, start : f32, end : f32 ) -> f32 {
@@ -156,14 +144,12 @@ fn vs_main( @location(0) bbPosition : vec3<f32>,
     var diffuse  = vec4<f32>( 0.0 );
     var specular = vec4<f32>( 0.0 );
 
-    let rot = rotationMatrix( vec3<f32>( 1.0,0.0,0.0 ), 1.5708 );
-
     for( var i : i32 = 0; i<FS.lights_used; i++ ){
-      var light_pos = normalize( mat3of( FS.view * FS.lights[i].tform * rot ) * vec3<f32>( 0.0,1.0,0.0 ) );
+      var light_pos = FS.lights[i].dir.xyz;
       var atten = 1.0;
 
       if( FS.lights[i].params.x>1.5 ){
-        let light_pos_eye = ( FS.view * vec4<f32>( FS.lights[i].tform[3].xyz, 1.0 ) ).xyz;
+        let light_pos_eye = FS.lights[i].pos.xyz;
         let to_light = light_pos_eye - eye_pos.xyz;
         let dist = max( length( to_light ), 0.0001 );
         let dir_to_light = to_light / dist;

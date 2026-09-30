@@ -13,14 +13,15 @@ struct BBWebGPUFrameState{
 	float proj[16];
 	float view[16];
 	struct LightData{
-		float mat[16];
+		float dir[4];
+		float pos[4];
 		float color[4];
 		float params[4];
 	}lights[8];
 	int32_t lights_used;
 	int32_t _pad[3];
 };
-static_assert( sizeof(BBWebGPUFrameState)==912,"BBFrameState layout mismatch" );
+static_assert( sizeof(BBWebGPUFrameState)==656,"BBFrameState layout mismatch" );
 
 struct BBWebGPUEntityState{
 	float world[16];
