@@ -272,7 +272,7 @@ def step_runtime():
     configure(RUNTIME_BUILD,
               [emcmake, "cmake", "-G", "Ninja", CMAKE_COMPAT,
                f"-DOUTPUT_PATH={os.path.basename(RUNTIME_OUT)}", "-DBB_PLATFORM=emscripten",
-               "-DBB_ENV=release", "-DBB_WEBGPU=ON", "-DARCH=webgpu", "-DBB_JSPI=ON", NG],
+               "-DBB_ENV=release", "-DBB_WEBGPU=ON", "-DARCH=webgpu", NG],
               cwd=RUNTIME_BUILD)
     run(["cmake", "--build", RUNTIME_BUILD, "-j", jobs()])
 
@@ -424,7 +424,6 @@ def link_game(emcc, flags):
                   "-o", web_obj])
 
     env = os.environ.copy()
-    env["SCPCB_JSPI"] = "1"
     env["LLVM_ROOT"] = os.path.join(NG, "llvm")
     env["blitzpath"] = RUNTIME_OUT
     env["SCPCB_WEBGPU"] = "1"
