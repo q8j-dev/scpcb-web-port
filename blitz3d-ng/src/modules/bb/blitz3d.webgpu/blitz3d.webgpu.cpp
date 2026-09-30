@@ -1042,7 +1042,7 @@ public:
 			memcpy( es.mat,mat,sizeof(mat) );
 			es.blend=ts.blend;
 			es.sphere_map=( flags&BBCanvas::CANVAS_TEX_SPHERE )?1:0;
-			es.cube_map=( flags&BBCanvas::CANVAS_TEX_CUBE )?1:0;
+			es.alpha=( flags&BBCanvas::CANVAS_TEX_ALPHA )?1:0;
 			es.flags=ts.flags;
 
 			if( canvas->gpuWritten() ){

@@ -14,6 +14,25 @@
 #define STBI_NO_STDIO
 #include "stb_image.h"
 
+static bool pngHasAlpha( const std::string &d ){
+	static const unsigned char sig[8]={ 137,80,78,71,13,10,26,10 };
+	if( d.size()<33 || memcmp( d.data(),sig,8 )!=0 ) return false;
+
+	unsigned char color_type=(unsigned char)d[25];
+	if( color_type==4 || color_type==6 ) return true;
+
+	size_t pos=8;
+	while( pos+8<=d.size() ){
+		uint32_t len=((uint32_t)(unsigned char)d[pos]<<24)|((uint32_t)(unsigned char)d[pos+1]<<16)|
+		             ((uint32_t)(unsigned char)d[pos+2]<<8)|(uint32_t)(unsigned char)d[pos+3];
+		const char *tag=d.data()+pos+4;
+		if( memcmp( tag,"tRNS",4 )==0 ) return true;
+		if( memcmp( tag,"IDAT",4 )==0 ) return false;
+		pos+=12+(size_t)len;
+	}
+	return false;
+}
+
 BBPixmap *bbLoadPixmapWithFreeImage( const std::string &path ){
 	std::streambuf *sb=gx_filesys->openFile( path,std::ios_base::in );
 	if( !sb ) return 0;
@@ -29,7 +48,7 @@ BBPixmap *bbLoadPixmapWithFreeImage( const std::string &path ){
 	BBPixmap *pm=new BBPixmap();
 	pm->format=PF_RGBA;
 	pm->width=w; pm->height=h; pm->depth=32; pm->pitch=w*4; pm->bpp=4;
-	pm->trans=(ch==4);
+	pm->trans=(ch==4) || pngHasAlpha( data );
 	pm->bits=new unsigned char[(size_t)w*4*h];
 	for( int y=0;y<h;y++ ){
 		uint32_t *dst=(uint32_t*)(pm->bits+(size_t)(h-1-y)*w*4);

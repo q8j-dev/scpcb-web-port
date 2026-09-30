@@ -31,7 +31,7 @@ struct BBWebGPUEntityState{
 	float fog_color[4];
 	struct TexState{
 		float mat[16];
-		int32_t blend,sphere_map,flags,cube_map;
+		int32_t blend,sphere_map,flags,alpha;
 	}texs[8];
 	float fog_range[2];
 	int32_t texs_used;
