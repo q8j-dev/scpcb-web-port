@@ -6,6 +6,7 @@
 #include <bb/blitz3d/graphics.h>
 #include <bb/graphics.webgpu/graphics.webgpu.h>
 
+#include <cstddef>
 #include <cstdint>
 
 
@@ -30,10 +31,6 @@ struct BBWebGPUEntityState{
 	float ambient[4];
 	float brush_color[4];
 	float fog_color[4];
-	struct TexState{
-		float mat[16];
-		int32_t blend,sphere_map,flags,alpha;
-	}texs[8];
 	float fog_range[2];
 	int32_t texs_used;
 	int32_t use_vertex_color;
@@ -43,8 +40,17 @@ struct BBWebGPUEntityState{
 	int32_t alpha_test;
 	float alpha_ref;
 	float _pad[3];
+	struct TexState{
+		float mat[16];
+		int32_t blend,sphere_map,flags,alpha;
+	}texs[8];
+
+	static size_t usedSize( int used ){
+		return offsetof( BBWebGPUEntityState,texs )+sizeof( TexState )*(size_t)used;
+	}
 };
 static_assert( sizeof(BBWebGPUEntityState)==864,"BBEntityState layout mismatch" );
+static_assert( offsetof(BBWebGPUEntityState,texs)==224,"BBEntityState texs offset mismatch" );
 
 struct BBWebGPUClearState{
 	float color[4];

@@ -2,6 +2,7 @@
 #include <bb/graphics/graphics.h>
 #include "std.h"
 #include <queue>
+#include <algorithm>
 #include "world.h"
 
 float stats3d[10];
@@ -341,6 +342,8 @@ struct TransComp{
 
 static std::vector<Model*> ord_mods,unord_mods;
 
+static std::vector<Model::Draw> opaque_draws;
+
 static std::priority_queue<Model*,std::vector<Model*>,OrderComp> ord_que;
 
 static std::priority_queue<Camera*,std::vector<Camera*>,OrderComp> cam_que;
@@ -454,8 +457,9 @@ void World::render( Camera *cam,Mirror *mirror ){
 	for( unsigned int k=0;k<unord_mods.size();++k ){
 		Model *mod=unord_mods[k];
 		if( !mod->doAutoFade( cam_tform.v ) ) continue;
-		render( mod,rc );
+		render( mod,rc,true );
 	}
+	flushOpaque();
 	bbScene->setZMode( BBScene::ZMODE_CMPONLY );
 	flushTransparent();
 
@@ -468,22 +472,46 @@ void World::render( Camera *cam,Mirror *mirror ){
 	}
 }
 
-void World::render( Model *mod,const RenderContext &rc ){
+void World::render( Model *mod,const RenderContext &rc,bool defer ){
 
 	bool trans=mod->render( rc );
 
 	if( mod->queueSize( Model::QUEUE_OPAQUE ) ){
-		if( mod->getRenderSpace()==Model::RENDER_SPACE_LOCAL ){
-			bbScene->setWorldMatrix( (BBScene::Matrix*)&mod->getRenderTform() );
+		if( defer ){
+			mod->takeQueue( Model::QUEUE_OPAQUE,opaque_draws );
 		}else{
-			bbScene->setWorldMatrix( 0 );
+			if( mod->getRenderSpace()==Model::RENDER_SPACE_LOCAL ){
+				bbScene->setWorldMatrix( (BBScene::Matrix*)&mod->getRenderTform() );
+			}else{
+				bbScene->setWorldMatrix( 0 );
+			}
+			mod->renderQueue( Model::QUEUE_OPAQUE );
 		}
-		mod->renderQueue( Model::QUEUE_OPAQUE );
 	}
 
 	if( trans || mod->queueSize( Model::QUEUE_TRANSPARENT ) ){
 		transparents.push( mod );
 	}
+}
+
+void World::flushOpaque(){
+
+	std::stable_sort( opaque_draws.begin(),opaque_draws.end() );
+
+	Model *current=0;
+	for( size_t k=0;k<opaque_draws.size();++k ){
+		const Model::Draw &d=opaque_draws[k];
+		if( d.model!=current ){
+			current=d.model;
+			if( current->getRenderSpace()==Model::RENDER_SPACE_LOCAL ){
+				bbScene->setWorldMatrix( (BBScene::Matrix*)&current->getRenderTform() );
+			}else{
+				bbScene->setWorldMatrix( 0 );
+			}
+		}
+		Model::drawQueued( d );
+	}
+	opaque_draws.clear();
 }
 
 void World::flushTransparent(){

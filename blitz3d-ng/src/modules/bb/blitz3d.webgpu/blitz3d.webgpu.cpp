@@ -159,6 +159,8 @@ public:
 };
 
 
+static unsigned g_mesh_generation=1;
+
 class WebGPUScene : public BBScene{
 public:
 	WebGPUContextResources *res;
@@ -181,6 +183,33 @@ private:
 	BBWebGPUEntityState entity;
 	bool frame_dirty=true,entity_dirty=true;
 	uint32_t frame_offset=0,entity_offset=0;
+
+	struct UniformCache{
+		std::vector<unsigned char> bytes;
+		uint32_t offset=0;
+		bool valid=false;
+	};
+	UniformCache frame_cache,entity_cache;
+
+	WGPURenderPipeline bound_pipeline=0;
+	bool bound_frame=false,bound_entity=false;
+	uint32_t bound_frame_offset=0,bound_entity_offset=0;
+	WGPUBindGroup bound_tex_group=0;
+	WGPUBuffer bound_vertex_buffer=0,bound_index_buffer=0;
+	unsigned bound_mesh_generation=0;
+
+	WGPUTextureView last_views[8];
+	WGPUSampler last_samplers[8];
+	bool last_tex_valid=false;
+
+	WGPUSampler sampler_fast[16]={};
+
+	void resetPassState(){
+		bound_pipeline=0;
+		bound_frame=bound_entity=false;
+		bound_tex_group=0;
+		bound_vertex_buffer=bound_index_buffer=0;
+	}
 
 	std::vector<WebGPULight*> lights;
 	float light_world[8][16];
@@ -267,6 +296,7 @@ private:
 			if( hit ){
 				if( it->second==current_tex_group ) current_tex_group=0;
 				if( it->second==default_tex_group ) default_tex_group=0;
+				if( it->second==bound_tex_group ) bound_tex_group=0;
 				wgpuBindGroupRelease( it->second );
 				it=tex_groups.erase( it );
 			}else{
@@ -494,8 +524,12 @@ public:
 		bool clamp_v=canvas_flags&BBCanvas::CANVAS_TEX_CLAMPV;
 
 		uint32_t key=(no_filter?1u:0u)|(mipmap?2u:0u)|(clamp_u?4u:0u)|(clamp_v?8u:0u);
+		if( sampler_fast[key] ) return sampler_fast[key];
 		std::map<uint32_t,WGPUSampler>::iterator it=samplers.find( key );
-		if( it!=samplers.end() ) return it->second;
+		if( it!=samplers.end() ){
+			sampler_fast[key]=it->second;
+			return it->second;
+		}
 
 		WGPUSamplerDescriptor d={};
 		d.label=bbStrView( "bb.3d.sampler" );
@@ -511,6 +545,7 @@ public:
 
 		WGPUSampler s=wgpuDeviceCreateSampler( res->device,&d );
 		samplers[key]=s;
+		sampler_fast[key]=s;
 		return s;
 	}
 
@@ -701,15 +736,27 @@ public:
 	}
 
 
-	uint32_t pushUniforms( const void *data,size_t size ){
+	uint32_t pushUniforms( const void *data,size_t size,size_t bind_size=0 ){
+		size_t extent=size>bind_size?size:bind_size;
 		size_t offset=(uniform_used+255)&~(size_t)255;
-		if( offset+size>uniform_capacity ){
+		if( offset+extent>uniform_capacity ){
 			flushAll();
 			offset=0;
 		}
 		memcpy( uniform_stage.data()+offset,data,size );
 		uniform_used=offset+size;
 		return (uint32_t)offset;
+	}
+
+	uint32_t pushCached( UniformCache &cache,const void *data,size_t size,size_t bind_size ){
+		if( cache.valid&&cache.bytes.size()==size&&memcmp( cache.bytes.data(),data,size )==0 ){
+			return cache.offset;
+		}
+		uint32_t offset=pushUniforms( data,size,bind_size );
+		cache.bytes.assign( (const unsigned char*)data,(const unsigned char*)data+size );
+		cache.offset=offset;
+		cache.valid=true;
+		return offset;
 	}
 
 	void endPass(){
@@ -719,6 +766,7 @@ public:
 			pass=0;
 		}
 		pass_canvas=0;
+		resetPassState();
 	}
 
 	void flushAll(){
@@ -729,6 +777,8 @@ public:
 		++submit_marker;
 		frame_dirty=true;
 		entity_dirty=true;
+		frame_cache.valid=false;
+		entity_cache.valid=false;
 	}
 
 	DepthTarget *ensureDepth( WebGPUCanvas *canvas ){
@@ -1063,15 +1113,17 @@ public:
 		}
 
 
-		for( int i=used;i<MAX_TEXTURES;i++ ){
-			memset( &entity.texs[i],0,sizeof(entity.texs[i]) );
-		}
-
 		entity.texs_used=used;
 		entity.alpha_test=alpha_test;
 		entity_dirty=true;
 
-		current_tex_group=getTexBindGroup( views,samps );
+		if( !last_tex_valid||!current_tex_group||
+		    memcmp( views,last_views,sizeof(views) )||memcmp( samps,last_samplers,sizeof(samps) ) ){
+			current_tex_group=getTexBindGroup( views,samps );
+			memcpy( last_views,views,sizeof(views) );
+			memcpy( last_samplers,samps,sizeof(samps) );
+			last_tex_valid=true;
+		}
 	}
 
 
@@ -1082,13 +1134,14 @@ public:
 
 		flushAll();
 
-		if( tex_groups.size()>512 ){
+		if( tex_groups.size()>2048 ){
 			for( std::map<std::array<uintptr_t,16>,WGPUBindGroup>::iterator it=tex_groups.begin();it!=tex_groups.end();++it ){
 				wgpuBindGroupRelease( it->second );
 			}
 			tex_groups.clear();
 			default_tex_group=0;
 			current_tex_group=0;
+			bound_tex_group=0;
 		}
 
 		lights.clear();
@@ -1150,6 +1203,9 @@ public:
 		wgpuRenderPassEncoderSetPipeline( p,getClearPipeline( clear_argb,clear_z,target->format() ) );
 		wgpuRenderPassEncoderSetBindGroup( p,0,clear_group,1,&offset );
 		wgpuRenderPassEncoderDraw( p,3,1,0,0 );
+
+		bound_pipeline=0;
+		bound_frame=false;
 	}
 
 	void render( BBMesh *m,int first_vert,int vert_cnt,int first_tri,int tri_cnt ){
@@ -1160,11 +1216,11 @@ public:
 		for( int attempt=0;attempt<4;++attempt ){
 			if( frame_dirty ){
 				updateLightsEye();
-				frame_offset=pushUniforms( &frame,sizeof(frame) );
+				frame_offset=pushCached( frame_cache,&frame,sizeof(frame),sizeof(frame) );
 				frame_dirty=false;
 			}
 			if( entity_dirty ){
-				entity_offset=pushUniforms( &entity,sizeof(entity) );
+				entity_offset=pushCached( entity_cache,&entity,BBWebGPUEntityState::usedSize( entity.texs_used ),sizeof(entity) );
 				entity_dirty=false;
 			}
 			if( !frame_dirty&&!entity_dirty ) break;
@@ -1173,12 +1229,39 @@ public:
 		WGPURenderPassEncoder p=ensurePass();
 		if( !p ) return;
 
-		wgpuRenderPassEncoderSetPipeline( p,getScenePipeline( target->format() ) );
-		wgpuRenderPassEncoderSetBindGroup( p,0,frame_group,1,&frame_offset );
-		wgpuRenderPassEncoderSetBindGroup( p,1,entity_group,1,&entity_offset );
-		wgpuRenderPassEncoderSetBindGroup( p,2,current_tex_group?current_tex_group:defaultTexGroup(),0,0 );
-		wgpuRenderPassEncoderSetVertexBuffer( p,0,mesh->vertex_buffer,0,WGPU_WHOLE_SIZE );
-		wgpuRenderPassEncoderSetIndexBuffer( p,mesh->index_buffer,WGPUIndexFormat_Uint32,0,WGPU_WHOLE_SIZE );
+		if( bound_mesh_generation!=g_mesh_generation ){
+			bound_vertex_buffer=bound_index_buffer=0;
+			bound_mesh_generation=g_mesh_generation;
+		}
+
+		WGPURenderPipeline pipeline=getScenePipeline( target->format() );
+		if( pipeline!=bound_pipeline ){
+			wgpuRenderPassEncoderSetPipeline( p,pipeline );
+			bound_pipeline=pipeline;
+		}
+		if( !bound_frame||bound_frame_offset!=frame_offset ){
+			wgpuRenderPassEncoderSetBindGroup( p,0,frame_group,1,&frame_offset );
+			bound_frame=true;
+			bound_frame_offset=frame_offset;
+		}
+		if( !bound_entity||bound_entity_offset!=entity_offset ){
+			wgpuRenderPassEncoderSetBindGroup( p,1,entity_group,1,&entity_offset );
+			bound_entity=true;
+			bound_entity_offset=entity_offset;
+		}
+		WGPUBindGroup tex_group=current_tex_group?current_tex_group:defaultTexGroup();
+		if( tex_group!=bound_tex_group ){
+			wgpuRenderPassEncoderSetBindGroup( p,2,tex_group,0,0 );
+			bound_tex_group=tex_group;
+		}
+		if( mesh->vertex_buffer!=bound_vertex_buffer ){
+			wgpuRenderPassEncoderSetVertexBuffer( p,0,mesh->vertex_buffer,0,WGPU_WHOLE_SIZE );
+			bound_vertex_buffer=mesh->vertex_buffer;
+		}
+		if( mesh->index_buffer!=bound_index_buffer ){
+			wgpuRenderPassEncoderSetIndexBuffer( p,mesh->index_buffer,WGPUIndexFormat_Uint32,0,WGPU_WHOLE_SIZE );
+			bound_index_buffer=mesh->index_buffer;
+		}
 		wgpuRenderPassEncoderDrawIndexed( p,(uint32_t)tri_cnt*3,1,(uint32_t)first_tri*3,first_vert,0 );
 
 		mesh->drawn_marker=submit_marker;
@@ -1226,6 +1309,7 @@ scene(scene),max_verts(mv>0?mv:1),max_tris(mt>0?mt:1),flags(f){
 }
 
 WebGPUMesh::~WebGPUMesh(){
+	++g_mesh_generation;
 	if( vertex_buffer ){ wgpuBufferRelease( vertex_buffer );vertex_buffer=0; }
 	if( index_buffer ){ wgpuBufferRelease( index_buffer );index_buffer=0; }
 	delete[] verts;

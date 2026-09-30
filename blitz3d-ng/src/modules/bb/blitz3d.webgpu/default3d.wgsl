@@ -31,7 +31,6 @@ struct BBEntityState {
   ambient : vec4<f32>,
   brush_color : vec4<f32>,
   fog_color : vec4<f32>,
-  texs : array<BBTexState,8>,
   fog_range : vec2<f32>,
   texs_used : i32,
   use_vertex_color : i32,
@@ -40,6 +39,7 @@ struct BBEntityState {
   fog_mode : i32,
   alpha_test : i32,
   alpha_ref : f32,
+  texs : array<BBTexState,8>,
 };
 
 @group(0) @binding(0) var<uniform> FS : BBFrameState;

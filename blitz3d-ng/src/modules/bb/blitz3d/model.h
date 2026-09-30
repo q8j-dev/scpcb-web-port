@@ -12,7 +12,19 @@ class PlaneModel;
 class Q3BSPModel;
 
 class Model : public Object{
+	class MeshQueue;
+
 public:
+	struct Draw{
+		Model *model;
+		MeshQueue *queue;
+		unsigned long long key0,key1;
+
+		bool operator<( const Draw &d )const{
+			return key0!=d.key0 ? key0<d.key0 : key1<d.key1;
+		}
+	};
+
 	enum{
 		RENDER_SPACE_LOCAL=0,
 		RENDER_SPACE_WORLD=1
@@ -39,6 +51,9 @@ public:
 	virtual void setRenderBrush( const Brush &b ){}
 	virtual bool render( const RenderContext &rc ){ return false; }
 	virtual void renderQueue( int type );
+
+	void takeQueue( int type,std::vector<Draw> &out );
+	static void drawQueued( const Draw &d );
 
 	virtual Sprite *getSprite(){ return 0; }
 	virtual Terrain *getTerrain(){ return 0; }
@@ -70,8 +85,6 @@ public:
 	int queueSize( int type )const{ return queues[type].size(); }
 
 private:
-	class MeshQueue;
-
 	int space;
 	Brush brush,render_brush;
 
