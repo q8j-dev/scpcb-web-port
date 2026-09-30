@@ -413,7 +413,7 @@ def step_game():
     deploy = os.path.join(ROOT, "webgame")
     os.makedirs(deploy, exist_ok=True)
     for old in os.listdir(deploy):
-        if old in ("scpcb.js", "scpcb.wasm", "assets.manifest.json") or old.startswith("assets.data"):
+        if old == "assets.manifest.json" or old.startswith("assets."):
             os.remove(os.path.join(deploy, old))
 
     for name in SELECTED:
@@ -421,8 +421,12 @@ def step_game():
         out = link_variant(name, emcc, assets_js)
         variant_dir = os.path.join(deploy, name)
         os.makedirs(variant_dir, exist_ok=True)
-        shutil.copy(out + ".js", variant_dir)
-        shutil.copy(out + ".wasm", variant_dir)
+        for old in os.listdir(variant_dir):
+            if old.startswith("scpcb."):
+                os.remove(os.path.join(variant_dir, old))
+        for ext in ("js", "wasm"):
+            digest = file_digest(out + "." + ext)[:16]
+            shutil.copy(out + "." + ext, os.path.join(variant_dir, f"scpcb.{digest}.{ext}"))
 
     shutil.copy(os.path.join(ROOT, "web-shell", "index.html"), os.path.join(deploy, "index.html"))
 
@@ -433,23 +437,23 @@ def step_game():
             chunk = src.read(chunk_size)
             if not chunk:
                 break
-            name = f"assets.data.{len(parts):03d}"
+            digest = hashlib.sha256(chunk).hexdigest()[:16]
+            name = f"assets.{digest}.bin"
             with open(os.path.join(deploy, name), "wb") as f:
                 f.write(chunk)
-            parts.append({"name": name, "size": len(chunk),
-                          "hash": hashlib.sha256(chunk).hexdigest()[:16]})
+            parts.append({"name": name, "size": len(chunk), "hash": digest})
 
-    variants = [n for n in VARIANTS if os.path.isfile(os.path.join(deploy, n, "scpcb.wasm"))]
-    version = hashlib.sha256()
-    for part in parts:
-        version.update(part["hash"].encode())
-    for name in variants:
-        for ext in ("js", "wasm"):
-            version.update(file_digest(os.path.join(deploy, name, f"scpcb.{ext}")).encode())
+    builds = {}
+    for name in VARIANTS:
+        variant_dir = os.path.join(deploy, name)
+        js = sorted(glob.glob(os.path.join(variant_dir, "scpcb.*.js")))
+        wasm = sorted(glob.glob(os.path.join(variant_dir, "scpcb.*.wasm")))
+        if js and wasm:
+            builds[name] = {"js": f"{name}/{os.path.basename(js[0])}",
+                            "wasm": f"{name}/{os.path.basename(wasm[0])}"}
 
     with open(os.path.join(deploy, "assets.manifest.json"), "w") as f:
-        json.dump({"version": version.hexdigest()[:16], "variants": variants,
-                   "size": os.path.getsize(assets_data), "chunkSize": chunk_size,
+        json.dump({"builds": builds, "size": os.path.getsize(assets_data),
                    "parts": parts}, f)
 
 

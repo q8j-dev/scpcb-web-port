@@ -461,7 +461,7 @@
   }
 
   async function fetchPart(cache, part, writes) {
-    const url = part.name + '?v=' + part.hash;
+    const url = part.name;
     if (cache) {
       const hit = await cache.match(url);
       if (hit) {
@@ -507,7 +507,7 @@
     await Promise.all(Array.from({ length: Math.min(4, manifest.parts.length) }, worker));
 
     if (cache) {
-      const wanted = new Set(manifest.parts.map((p) => new URL(p.name + '?v=' + p.hash, location.href).href));
+      const wanted = new Set(manifest.parts.map((p) => new URL(p.name, location.href).href));
       Promise.all(writes)
         .then(() => cache.keys())
         .then((keys) => Promise.all(keys.filter((k) => !wanted.has(k.url)).map((k) => cache.delete(k))))
@@ -542,7 +542,7 @@
       return;
     }
 
-    const variant = pickVariant(manifest.variants);
+    const variant = pickVariant(Object.keys(manifest.builds));
     if (!variant) {
       fail('This build needs a newer browser. Use Chrome or Edge 137 or later.');
       return;
@@ -560,10 +560,11 @@
     await loadPersisted();
     persisted.options = withResolution(persisted.options, resolution);
 
-    Module.locateFile = (path, dir) => dir + path + '?v=' + manifest.version;
+    const build = manifest.builds[variant];
+    Module.locateFile = (path, dir) => path.endsWith('.wasm') ? build.wasm : dir + path;
     const s = document.createElement('script');
     s.async = true;
-    s.src = variant + '/scpcb.js?v=' + manifest.version;
+    s.src = build.js;
     document.body.appendChild(s);
   })();
 </script>
