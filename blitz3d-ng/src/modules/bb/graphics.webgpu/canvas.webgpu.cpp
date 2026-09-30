@@ -13,7 +13,7 @@ WebGPUCanvas::WebGPUCanvas( WebGPUContextResources *res,int w,int h,int f ):
 	res(res),width(w),height(h),pixels(0),lock_count(0),font(0),
 	scale_x(1.0f),scale_y(1.0f),origin_x(0),origin_y(0),handle_x(0),handle_y(0),
 	mask(0),pixmap(0),dirty(false),pixmap_stale(false),clear_pending(false),
-	gpu_written(false),is_surface(false),float_format(false),hit_valid(false),cube_face(0),cube_mode(0),
+	gpu_written(false),is_surface(false),float_format(false),use_mips(false),mip_levels(1),level0_view(0),mips_dirty(false),hit_valid(false),cube_face(0),cube_mode(0),
 	texture(0),twidth(0),theight(0),texture_view(0){
 	flags=f;
 
@@ -31,6 +31,10 @@ WebGPUCanvas::WebGPUCanvas( WebGPUContextResources *res,int f ):WebGPUCanvas( re
 WebGPUCanvas::~WebGPUCanvas(){
 	if( res->pass_target==this ) res->endPass();
 	res->notifyCanvasDestroyed( this );
+	if( level0_view ){
+		wgpuTextureViewRelease( level0_view );
+		level0_view=0;
+	}
 	if( texture_view ){
 		res->invalidateBindGroupsFor( texture_view );
 		wgpuTextureViewRelease( texture_view );
@@ -65,6 +69,10 @@ void WebGPUCanvas::ensureTexture(){
 	int w=width>0?width:1,h=height>0?height:1;
 	if( texture && twidth==w && theight==h ) return;
 
+	if( level0_view ){
+		wgpuTextureViewRelease( level0_view );
+		level0_view=0;
+	}
 	if( texture_view ){
 		res->invalidateBindGroupsFor( texture_view );
 		wgpuTextureViewRelease( texture_view );
@@ -82,7 +90,12 @@ void WebGPUCanvas::ensureTexture(){
 	desc.dimension=WGPUTextureDimension_2D;
 	desc.size={ (uint32_t)w,(uint32_t)h,1 };
 	desc.format=format();
-	desc.mipLevelCount=1;
+	mip_levels=1;
+	if( use_mips && !float_format ){
+		int longest=w>h?w:h;
+		while( longest>1 ){ longest>>=1;++mip_levels; }
+	}
+	desc.mipLevelCount=(uint32_t)mip_levels;
 	desc.sampleCount=1;
 	texture=wgpuDeviceCreateTexture( res->device,&desc );
 	texture_view=wgpuTextureCreateView( texture,0 );
@@ -93,6 +106,21 @@ WGPUTextureView WebGPUCanvas::targetView(){
 	if( is_surface ) return res->acquireSurfaceView();
 	if( dirty ) uploadData();
 	ensureTexture();
+	if( mip_levels>1 ){
+		if( !level0_view ){
+			WGPUTextureViewDescriptor vd={};
+			vd.format=format();
+			vd.dimension=WGPUTextureViewDimension_2D;
+			vd.baseMipLevel=0;
+			vd.mipLevelCount=1;
+			vd.baseArrayLayer=0;
+			vd.arrayLayerCount=1;
+			vd.aspect=WGPUTextureAspect_All;
+			level0_view=wgpuTextureCreateView( texture,&vd );
+		}
+		mips_dirty=true;
+		return level0_view;
+	}
 	return texture_view;
 }
 
@@ -100,6 +128,11 @@ WGPUTextureView WebGPUCanvas::sampleView(){
 	if( is_surface ) return res->acquireSurfaceView();
 	if( dirty ) uploadData();
 	ensureTexture();
+	if( mips_dirty ){
+		mips_dirty=false;
+		res->flush();
+		res->generateMips( texture,mip_levels );
+	}
 	return texture_view;
 }
 
@@ -189,6 +222,7 @@ void WebGPUCanvas::uploadData(){
 	layout.rowsPerImage=(uint32_t)height;
 	WGPUExtent3D extent={ (uint32_t)width,(uint32_t)height,1 };
 	wgpuQueueWriteTexture( res->queue,&dst,src,(size_t)width*height*4,&layout,&extent );
+	if( mip_levels>1 && fmt==WGPUTextureFormat_RGBA8Unorm ) res->generateMips( tex,mip_levels );
 
 	pixmap_stale=false;
 	delete pm;
@@ -333,6 +367,7 @@ void WebGPUCanvas::setPixmap( BBPixmap *pm ){
 	pixmap=pm;
 	pixmap_stale=false;
 	hit_valid=false;
+	use_mips=( flags&CANVAS_TEX_MIPMAP )!=0 && ( flags&CANVAS_TEXTURE )!=0;
 
 	width=pm->width;
 	height=pm->height;

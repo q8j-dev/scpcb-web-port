@@ -32,6 +32,10 @@ protected:
 
 	bool is_surface;
 	bool float_format;
+	bool use_mips;
+	int mip_levels;
+	WGPUTextureView level0_view;
+	bool mips_dirty;
 
 	std::vector<unsigned char> hit_mask;
 	bool hit_valid;
@@ -68,7 +72,7 @@ public:
 
 	bool isSurface()const{ return is_surface; }
 	void useFloatFormat(){ float_format=true; }
-	bool needsUpload()const{ return dirty; }
+	bool needsUpload()const{ return dirty||mips_dirty; }
 	bool gpuWritten()const{ return gpu_written; }
 	WGPUTextureFormat format()const;
 	WGPUTextureView targetView();

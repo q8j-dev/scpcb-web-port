@@ -386,6 +386,146 @@ void WebGPUContextResources::ensurePipelineObjects(){
 }
 
 
+static const char *kMipShader=
+	"@group(0) @binding(0) var s : sampler;\n"
+	"@group(0) @binding(1) var t : texture_2d<f32>;\n"
+	"struct VOut { @builtin(position) pos : vec4<f32>, @location(0) uv : vec2<f32> };\n"
+	"@vertex fn vs( @builtin(vertex_index) i : u32 ) -> VOut {\n"
+	"  var p = array<vec2<f32>,3>( vec2<f32>( -1.0,-1.0 ), vec2<f32>( 3.0,-1.0 ), vec2<f32>( -1.0,3.0 ) );\n"
+	"  var o : VOut;\n"
+	"  o.pos = vec4<f32>( p[i],0.0,1.0 );\n"
+	"  o.uv = vec2<f32>( (p[i].x+1.0)*0.5, 1.0-(p[i].y+1.0)*0.5 );\n"
+	"  return o;\n"
+	"}\n"
+	"@fragment fn fs( v : VOut ) -> @location(0) vec4<f32> {\n"
+	"  return textureSampleLevel( t,s,v.uv,0.0 );\n"
+	"}\n";
+
+void WebGPUContextResources::ensureMipPipeline(){
+	if( mip_pipeline||!device ) return;
+
+	WGPUShaderSourceWGSL wgsl={};
+	wgsl.chain.sType=WGPUSType_ShaderSourceWGSL;
+	wgsl.code.data=kMipShader;
+	wgsl.code.length=strlen( kMipShader );
+	WGPUShaderModuleDescriptor smdesc={};
+	smdesc.nextInChain=&wgsl.chain;
+	smdesc.label=bbStrView( "bb.mips.wgsl" );
+	mip_shader=wgpuDeviceCreateShaderModule( device,&smdesc );
+
+	WGPUBindGroupLayoutEntry entries[2]={};
+	entries[0].binding=0;
+	entries[0].visibility=WGPUShaderStage_Fragment;
+	entries[0].sampler.type=WGPUSamplerBindingType_Filtering;
+	entries[1].binding=1;
+	entries[1].visibility=WGPUShaderStage_Fragment;
+	entries[1].texture.sampleType=WGPUTextureSampleType_Float;
+	entries[1].texture.viewDimension=WGPUTextureViewDimension_2D;
+	WGPUBindGroupLayoutDescriptor bgldesc={};
+	bgldesc.label=bbStrView( "bb.mips.bgl" );
+	bgldesc.entryCount=2;
+	bgldesc.entries=entries;
+	mip_layout=wgpuDeviceCreateBindGroupLayout( device,&bgldesc );
+
+	WGPUPipelineLayoutDescriptor pldesc={};
+	pldesc.label=bbStrView( "bb.mips.layout" );
+	pldesc.bindGroupLayoutCount=1;
+	pldesc.bindGroupLayouts=&mip_layout;
+	mip_pipeline_layout=wgpuDeviceCreatePipelineLayout( device,&pldesc );
+
+	WGPUColorTargetState target={};
+	target.format=WGPUTextureFormat_RGBA8Unorm;
+	target.writeMask=WGPUColorWriteMask_All;
+
+	WGPUFragmentState frag={};
+	frag.module=mip_shader;
+	frag.entryPoint=bbStrView( "fs" );
+	frag.targetCount=1;
+	frag.targets=&target;
+
+	WGPURenderPipelineDescriptor desc={};
+	desc.label=bbStrView( "bb.mips.pipeline" );
+	desc.layout=mip_pipeline_layout;
+	desc.vertex.module=mip_shader;
+	desc.vertex.entryPoint=bbStrView( "vs" );
+	desc.primitive.topology=WGPUPrimitiveTopology_TriangleList;
+	desc.primitive.frontFace=WGPUFrontFace_CCW;
+	desc.primitive.cullMode=WGPUCullMode_None;
+	desc.multisample.count=1;
+	desc.multisample.mask=0xffffffff;
+	desc.fragment=&frag;
+	mip_pipeline=wgpuDeviceCreateRenderPipeline( device,&desc );
+}
+
+void WebGPUContextResources::generateMips( WGPUTexture tex,int levels ){
+	if( levels<2||!device||!tex ) return;
+	ensureMipPipeline();
+	if( !mip_pipeline ) return;
+
+	WGPUCommandEncoderDescriptor edesc={};
+	edesc.label=bbStrView( "bb.mips.encoder" );
+	WGPUCommandEncoder enc=wgpuDeviceCreateCommandEncoder( device,&edesc );
+
+	for( int level=1;level<levels;++level ){
+		WGPUTextureViewDescriptor sv={};
+		sv.format=WGPUTextureFormat_RGBA8Unorm;
+		sv.dimension=WGPUTextureViewDimension_2D;
+		sv.baseMipLevel=(uint32_t)(level-1);
+		sv.mipLevelCount=1;
+		sv.baseArrayLayer=0;
+		sv.arrayLayerCount=1;
+		sv.aspect=WGPUTextureAspect_All;
+		WGPUTextureView src=wgpuTextureCreateView( tex,&sv );
+
+		WGPUTextureViewDescriptor dv=sv;
+		dv.baseMipLevel=(uint32_t)level;
+		WGPUTextureView dst=wgpuTextureCreateView( tex,&dv );
+
+		WGPUBindGroupEntry entries[2]={};
+		entries[0].binding=0;
+		entries[0].sampler=sampler_linear;
+		entries[1].binding=1;
+		entries[1].textureView=src;
+		WGPUBindGroupDescriptor bdesc={};
+		bdesc.label=bbStrView( "bb.mips.group" );
+		bdesc.layout=mip_layout;
+		bdesc.entryCount=2;
+		bdesc.entries=entries;
+		WGPUBindGroup group=wgpuDeviceCreateBindGroup( device,&bdesc );
+
+		WGPURenderPassColorAttachment att={};
+		att.view=dst;
+		att.depthSlice=WGPU_DEPTH_SLICE_UNDEFINED;
+		att.loadOp=WGPULoadOp_Clear;
+		att.storeOp=WGPUStoreOp_Store;
+		att.clearValue={ 0.0,0.0,0.0,0.0 };
+		WGPURenderPassDescriptor pdesc={};
+		pdesc.label=bbStrView( "bb.mips.pass" );
+		pdesc.colorAttachmentCount=1;
+		pdesc.colorAttachments=&att;
+
+		WGPURenderPassEncoder pass=wgpuCommandEncoderBeginRenderPass( enc,&pdesc );
+		wgpuRenderPassEncoderSetPipeline( pass,mip_pipeline );
+		wgpuRenderPassEncoderSetBindGroup( pass,0,group,0,0 );
+		wgpuRenderPassEncoderDraw( pass,3,1,0,0 );
+		wgpuRenderPassEncoderEnd( pass );
+		wgpuRenderPassEncoderRelease( pass );
+
+		wgpuBindGroupRelease( group );
+		wgpuTextureViewRelease( src );
+		wgpuTextureViewRelease( dst );
+	}
+
+	WGPUCommandBufferDescriptor cdesc={};
+	cdesc.label=bbStrView( "bb.mips.commands" );
+	WGPUCommandBuffer commands=wgpuCommandEncoderFinish( enc,&cdesc );
+	wgpuCommandEncoderRelease( enc );
+	if( commands ){
+		wgpuQueueSubmit( queue,1,&commands );
+		wgpuCommandBufferRelease( commands );
+	}
+}
+
 WGPUTextureView WebGPUContextResources::acquireSurfaceView(){
 	if( surface_view ) return surface_view;
 	if( !surface ) return 0;
@@ -678,6 +818,10 @@ void WebGPUContextResources::destroy(){
 	if( sampler_nearest ){ wgpuSamplerRelease( sampler_nearest );sampler_nearest=0; }
 	if( pipeline_layout ){ wgpuPipelineLayoutRelease( pipeline_layout );pipeline_layout=0; }
 	if( bind_layout ){ wgpuBindGroupLayoutRelease( bind_layout );bind_layout=0; }
+	if( mip_pipeline ){ wgpuRenderPipelineRelease( mip_pipeline );mip_pipeline=0; }
+	if( mip_pipeline_layout ){ wgpuPipelineLayoutRelease( mip_pipeline_layout );mip_pipeline_layout=0; }
+	if( mip_layout ){ wgpuBindGroupLayoutRelease( mip_layout );mip_layout=0; }
+	if( mip_shader ){ wgpuShaderModuleRelease( mip_shader );mip_shader=0; }
 	if( shader ){ wgpuShaderModuleRelease( shader );shader=0; }
 	if( surface ){ wgpuSurfaceUnconfigure( surface );wgpuSurfaceRelease( surface );surface=0; }
 	if( queue ){ wgpuQueueRelease( queue );queue=0; }

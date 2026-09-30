@@ -76,6 +76,11 @@ struct WebGPUContextResources{
 	size_t uniform_capacity=0,uniform_used=0;
 	std::vector<unsigned char> vertex_stage,uniform_stage;
 
+	WGPUShaderModule mip_shader=0;
+	WGPUBindGroupLayout mip_layout=0;
+	WGPUPipelineLayout mip_pipeline_layout=0;
+	WGPURenderPipeline mip_pipeline=0;
+
 	WGPUCommandEncoder encoder=0;
 	WGPURenderPassEncoder pass=0;
 	WebGPUCanvas *pass_target=0;
@@ -94,6 +99,8 @@ struct WebGPUContextResources{
 	bool initDevice( const char *canvas_selector,int width,int height );
 	void configureSurface( int width,int height );
 	void ensurePipelineObjects();
+	void ensureMipPipeline();
+	void generateMips( WGPUTexture tex,int levels );
 
 	WGPUTextureView acquireSurfaceView();
 	void releaseSurfaceTexture();
