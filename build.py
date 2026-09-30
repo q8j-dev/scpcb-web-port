@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import concurrent.futures
 import configparser
 import glob
 import hashlib
@@ -49,24 +48,8 @@ os.environ["PATH"] = os.path.dirname(sys.executable) + os.pathsep + os.environ.g
 os.environ.setdefault("EMSDK_PYTHON", sys.executable)
 
 NATIVE_BUILD = os.path.join(NG, "build", f"{ARCH}-{BB_PLATFORM}-release")
-VARIANTS = {
-    "jspi": {
-        "build": "webgpu-emscripten-jspi-release",
-        "out": "_release_webgpu_jspi",
-        "cmake": ["-DBB_JSPI=ON"],
-        "eh": "-fwasm-exceptions",
-        "env": {"SCPCB_JSPI": "1"},
-    },
-    "compat": {
-        "build": "webgpu-emscripten-release",
-        "out": "_release_webgpu",
-        "cmake": [],
-        "eh": "-fexceptions",
-        "env": {},
-    },
-}
-SELECTED = list(VARIANTS)
-FAST = False
+RUNTIME_BUILD = os.path.join(NG, "build", "webgpu-emscripten-jspi-release")
+RUNTIME_OUT = os.path.join(NG, "_release_webgpu_jspi")
 BLITZCC = os.path.join(NG, "_release", "bin", "blitzcc" + EXE)
 
 
@@ -284,18 +267,14 @@ def step_runtime():
     emcmake = emscripten_tools()[0]
     need("cmake", "Install CMake.")
     need("ninja", "Install Ninja.")
-    for name in SELECTED:
-        variant = VARIANTS[name]
-        log(f"WebGPU runtime libraries (wasm, {name})")
-        build_dir = os.path.join(NG, "build", variant["build"])
-        os.makedirs(build_dir, exist_ok=True)
-        configure(build_dir,
-                  [emcmake, "cmake", "-G", "Ninja", CMAKE_COMPAT,
-                   f"-DOUTPUT_PATH={variant['out']}", "-DBB_PLATFORM=emscripten",
-                   "-DBB_ENV=release", "-DBB_WEBGPU=ON", "-DARCH=webgpu",
-                   *variant["cmake"], NG],
-                  cwd=build_dir)
-        run(["cmake", "--build", build_dir, "-j", jobs()])
+    log("WebGPU runtime libraries (wasm)")
+    os.makedirs(RUNTIME_BUILD, exist_ok=True)
+    configure(RUNTIME_BUILD,
+              [emcmake, "cmake", "-G", "Ninja", CMAKE_COMPAT,
+               f"-DOUTPUT_PATH={os.path.basename(RUNTIME_OUT)}", "-DBB_PLATFORM=emscripten",
+               "-DBB_ENV=release", "-DBB_WEBGPU=ON", "-DARCH=webgpu", "-DBB_JSPI=ON", NG],
+              cwd=RUNTIME_BUILD)
+    run(["cmake", "--build", RUNTIME_BUILD, "-j", jobs()])
 
 
 GAME_DIR = os.path.join(ROOT, "upstream-scpcb")
@@ -407,9 +386,9 @@ def tree_digest(h, root, skip=()):
             h.update(file_digest(path).encode())
 
 
-def link_stamp(name, emcc, flags):
+def link_stamp(emcc, flags):
     h = hashlib.sha256()
-    h.update(json.dumps([name, VARIANTS[name], flags, os.path.realpath(emcc)], sort_keys=True).encode())
+    h.update(json.dumps([flags, os.path.realpath(emcc)]).encode())
     for dirpath, dirs, files in os.walk(GAME_DIR):
         dirs[:] = sorted(d for d in dirs if d not in PACKAGED_DIRS)
         for fn in sorted(files):
@@ -419,7 +398,7 @@ def link_stamp(name, emcc, flags):
                 h.update(file_digest(path).encode())
     h.update(file_digest(os.path.join(WEBGPU_SRC, "web_compat.cpp")).encode())
     h.update(file_digest(BLITZCC).encode())
-    tree_digest(h, os.path.join(NG, VARIANTS[name]["out"]))
+    tree_digest(h, RUNTIME_OUT)
     return h.hexdigest()
 
 
@@ -432,41 +411,36 @@ def run_captured(cmd, **kw):
     return proc.stdout
 
 
-def link_variant(name, emcc, flags):
-    variant = VARIANTS[name]
-    work = os.path.join(WORK_DIR, name)
-    os.makedirs(work, exist_ok=True)
+def link_game(emcc, flags):
+    os.makedirs(WORK_DIR, exist_ok=True)
 
-    compat_obj = os.path.join(work, "web_compat.o")
+    web_obj = os.path.join(WORK_DIR, "web_compat.o")
     run_captured([emcc, os.path.join(WEBGPU_SRC, "web_compat.cpp"),
-                  "-c", "-O2", "-std=c++17", variant["eh"],
+                  "-c", "-O2", "-std=c++17", "-fwasm-exceptions",
                   "-I", os.path.join(NG, "src", "modules"),
                   "-I", os.path.join(NG, "src", "modules", "bb", "pixmap"),
                   "-I", os.path.join(NG, "src"),
                   "-I", WEBGPU_SRC,
-                  "-o", compat_obj])
+                  "-o", web_obj])
 
-    out_dir = os.path.join(NG, variant["out"])
     env = os.environ.copy()
-    env.pop("SCPCB_JSPI", None)
-    env.update(variant["env"])
+    env["SCPCB_JSPI"] = "1"
     env["LLVM_ROOT"] = os.path.join(NG, "llvm")
-    env["blitzpath"] = out_dir
+    env["blitzpath"] = RUNTIME_OUT
     env["SCPCB_WEBGPU"] = "1"
-    env["SCPCB_LIB_DIR"] = os.path.join(out_dir, "bin", "wasm32-unknown-emscripten", "lib")
-    env["SCPCB_COMPAT_OBJ"] = compat_obj
+    env["SCPCB_LIB_DIR"] = os.path.join(RUNTIME_OUT, "bin", "wasm32-unknown-emscripten", "lib")
+    env["SCPCB_COMPAT_OBJ"] = web_obj
     env["SCPCB_EMCC_EXTRA"] = f"-sSTACK_SIZE=16777216 -sDEFAULT_TO_CXX -sGROWABLE_ARRAYBUFFERS=0 {flags}"
 
-    out = os.path.join(work, "scpcb")
+    out = os.path.join(WORK_DIR, "scpcb")
     run_captured([BLITZCC, "-target", "emscripten", "-o", out, "Main.bb"], cwd=GAME_DIR, env=env)
     return out
 
 
-def build_flags(fast):
+def build_flags():
     if os.environ.get("SCPCB_DEBUG", "0") == "1":
         return "-O2 -sASSERTIONS=1 --profiling-funcs"
-    opt = "-O2" if fast else "-O3"
-    return f"{opt} -sASSERTIONS=0 -sGL_TRACK_ERRORS=0 -sINITIAL_MEMORY=536870912"
+    return "-O3 -sASSERTIONS=0 -sGL_TRACK_ERRORS=0 -sINITIAL_MEMORY=536870912"
 
 
 def publish(src, dst_dir, stem, ext):
@@ -526,54 +500,33 @@ def step_game():
     deploy = os.path.join(ROOT, "webgame")
     os.makedirs(deploy, exist_ok=True)
 
-    flags = build_flags(FAST)
-    todo = []
-    for name in SELECTED:
-        work = os.path.join(WORK_DIR, name)
-        stamp = link_stamp(name, emcc, flags)
-        stamp_file = os.path.join(work, "link.stamp")
-        built = all(os.path.isfile(os.path.join(work, f"scpcb.{e}")) for e in ("js", "wasm"))
-        try:
-            with open(stamp_file) as f:
-                current = f.read().strip() == stamp
-        except OSError:
-            current = False
-        if built and current:
-            print(f"  {name}: up to date")
-        else:
-            todo.append((name, stamp, stamp_file))
-
-    def link(item):
-        name, stamp, stamp_file = item
+    flags = build_flags()
+    stamp = link_stamp(emcc, flags)
+    stamp_file = os.path.join(WORK_DIR, "link.stamp")
+    built = all(os.path.isfile(os.path.join(WORK_DIR, f"scpcb.{e}")) for e in ("js", "wasm"))
+    try:
+        with open(stamp_file) as f:
+            current = f.read().strip() == stamp
+    except OSError:
+        current = False
+    if built and current:
+        print("  up to date")
+    else:
+        if os.path.isfile(stamp_file):
+            os.remove(stamp_file)
         start = time.time()
-        stale = os.path.join(os.path.dirname(stamp_file), "link.stamp")
-        if os.path.isfile(stale):
-            os.remove(stale)
-        link_variant(name, emcc, flags)
+        link_game(emcc, flags)
         with open(stamp_file, "w") as f:
             f.write(stamp)
-        return name, time.time() - start
+        print(f"  linked in {time.time() - start:.0f}s", flush=True)
 
-    if todo:
-        print(f"  linking {', '.join(t[0] for t in todo)}", flush=True)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(todo)) as pool:
-            for name, seconds in pool.map(link, todo):
-                print(f"  {name}: linked in {seconds:.0f}s", flush=True)
-
-    for name in SELECTED:
-        work = os.path.join(WORK_DIR, name)
-        variant_dir = os.path.join(deploy, name)
-        os.makedirs(variant_dir, exist_ok=True)
-        keep = {publish(os.path.join(work, f"scpcb.{ext}"), variant_dir, "scpcb", ext) for ext in ("js", "wasm")}
-        for old in os.listdir(variant_dir):
-            if old.startswith("scpcb.") and old not in keep:
-                os.remove(os.path.join(variant_dir, old))
+    game = {ext: publish(os.path.join(WORK_DIR, f"scpcb.{ext}"), deploy, "scpcb", ext) for ext in ("js", "wasm")}
 
     shutil.copyfile(os.path.join(ROOT, "web-shell", "index.html"), os.path.join(deploy, "index.html"))
 
     loader = publish(assets_js, deploy, "assets", "js")
     parts = asset_parts()
-    wanted = {p["name"] for p in parts} | {loader, "assets.manifest.json"}
+    wanted = {p["name"] for p in parts} | {loader, "assets.manifest.json", *game.values()}
     with open(assets_data, "rb") as src:
         for part in parts:
             path = os.path.join(deploy, part["name"])
@@ -583,21 +536,14 @@ def step_game():
             with open(path, "wb") as f:
                 f.write(src.read(part["size"]))
     for old in os.listdir(deploy):
-        if old.startswith("assets.") and old not in wanted:
-            os.remove(os.path.join(deploy, old))
+        path = os.path.join(deploy, old)
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        elif (old.startswith("assets.") or old.startswith("scpcb.")) and old not in wanted:
+            os.remove(path)
 
-    builds = {}
-    for name in VARIANTS:
-        variant_dir = os.path.join(deploy, name)
-        if not os.path.isdir(variant_dir):
-            continue
-        js = sorted(glob.glob(os.path.join(variant_dir, "scpcb.*.js")))
-        wasm = sorted(glob.glob(os.path.join(variant_dir, "scpcb.*.wasm")))
-        if js and wasm:
-            builds[name] = {"js": f"{name}/{os.path.basename(js[0])}",
-                            "wasm": f"{name}/{os.path.basename(wasm[0])}"}
-
-    manifest = {"builds": builds, "loader": loader, "size": os.path.getsize(assets_data),
+    manifest = {"js": game["js"], "wasm": game["wasm"], "loader": loader,
+                "size": os.path.getsize(assets_data),
                 "parts": [{"name": p["name"], "size": p["size"]} for p in parts]}
     with open(os.path.join(deploy, "assets.manifest.json"), "w") as f:
         json.dump(manifest, f)
@@ -607,20 +553,10 @@ def main():
     ap = argparse.ArgumentParser(description="Build SCP: Containment Breach (Web).")
     ap.add_argument("steps", nargs="*", choices=STEPS,
                     metavar="step", help=f"any of: {', '.join(STEPS)} (default: all)")
-    ap.add_argument("--variant", choices=["all", *VARIANTS], default="all",
-                    help="build only one of the wasm builds (default: all)")
-    ap.add_argument("--fast", action="store_true",
-                    help="quick local iteration: skip the wasm optimizer and build only the jspi variant")
     ap.add_argument("--serve", action="store_true",
                     help="serve webgame/ on http://127.0.0.1:8090 when done")
     args = ap.parse_args()
 
-    global FAST
-    FAST = args.fast
-    if args.variant != "all":
-        SELECTED[:] = [args.variant]
-    elif FAST:
-        SELECTED[:] = ["jspi"]
     steps = args.steps or STEPS
     print(f"platform: {SYSTEM} {ARCH}")
     for name in STEPS:

@@ -441,17 +441,6 @@
 
   const ASSET_CACHE = 'scpcb-assets';
 
-  const jspiSupported = typeof WebAssembly.Suspending === 'function' &&
-                        typeof WebAssembly.promising === 'function';
-
-  function pickVariant(available) {
-    const wanted = new URLSearchParams(location.search).get('variant');
-    if (wanted && available.includes(wanted)) return wanted;
-    if (jspiSupported && available.includes('jspi')) return 'jspi';
-    if (available.includes('compat')) return 'compat';
-    return null;
-  }
-
   async function openAssetCache() {
     try {
       return typeof caches === 'undefined' ? null : await caches.open(ASSET_CACHE);
@@ -521,6 +510,10 @@
       fail('This game requires WebGPU. Use Chrome or Edge 113+, or Safari 26+, over HTTPS or localhost.');
       return;
     }
+    if (typeof WebAssembly.Suspending !== 'function' || typeof WebAssembly.promising !== 'function') {
+      fail('This game needs a newer browser. Use Chrome or Edge 137 or later.');
+      return;
+    }
     let adapter = null;
     try { adapter = await navigator.gpu.requestAdapter(); } catch (e) {}
     if (!adapter) {
@@ -542,13 +535,6 @@
       return;
     }
 
-    const variant = pickVariant(Object.keys(manifest.builds));
-    if (!variant) {
-      fail('This build needs a newer browser. Use Chrome or Edge 137 or later.');
-      return;
-    }
-    console.log('using the ' + variant + ' build');
-
     const loadStart = performance.now();
     try {
       const buf = await loadAssets(manifest);
@@ -562,8 +548,7 @@
     await loadPersisted();
     persisted.options = withResolution(persisted.options, resolution);
 
-    const build = manifest.builds[variant];
-    Module.locateFile = (path, dir) => path.endsWith('.wasm') ? build.wasm : dir + path;
+    Module.locateFile = (path, dir) => path.endsWith('.wasm') ? manifest.wasm : dir + path;
     const loadScript = (src) => new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.onload = resolve;
@@ -573,7 +558,7 @@
     });
     try {
       await loadScript(manifest.loader);
-      await loadScript(build.js);
+      await loadScript(manifest.js);
     } catch (e) {
       fail('Failed to start the game: ' + e.message);
     }

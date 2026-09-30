@@ -21,9 +21,9 @@ python3 build.py
 
 The first Linux build compiles LLVM from source, which takes an hour or more. macOS on Apple Silicon and Windows download a prebuilt LLVM.
 
-The game is built twice. The `jspi` build uses JavaScript Promise Integration and native WebAssembly exceptions, which need Chrome or Edge 137 or later and give a smaller, faster game. The `compat` build uses Asyncify and works in every browser with WebGPU. The page picks `jspi` when the browser supports it. Add `?variant=compat` to the address to force the other one. `python3 build.py --variant jspi` builds only one of them.
+The game uses JavaScript Promise Integration and native WebAssembly exceptions, so it needs Chrome or Edge 137 or later with WebGPU.
 
-Rebuilds only do the work that changed. Changing game data only repackages it. Changing game or runtime code relinks the game. `python3 build.py --fast` builds only the `jspi` variant with lighter optimization, which takes about 20 seconds after a code change. The `compat` build is the slow one, about 3 minutes, because of the Asyncify pass.
+Rebuilds only do the work that changed. Changing game data only repackages it, which takes a couple of seconds. Changing game or runtime code relinks the game, which takes about 30 seconds.
 
 ## Running
 
