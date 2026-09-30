@@ -16,6 +16,8 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 STAGE_DIR = os.path.join(tempfile.gettempdir(), "scpcb-web")
 WORK_DIR = os.path.join(tempfile.gettempdir(), "scpcb-web-webgpu")
 
+WEBGPU_SRC = os.path.join(ROOT, "blitz3d-ng", "src", "modules", "bb", "graphics.webgpu")
+
 EXE_SUFFIX = ".exe" if platform.system() == "Windows" else ""
 
 
@@ -32,14 +34,18 @@ def main():
     if not os.path.isfile(blitzcc):
         sys.exit(f"error: {blitzcc} not found - build blitzcc first (see README.md)")
 
+    emcc = shutil.which("emcc")
+    if not emcc:
+        sys.exit("error: emcc not found - activate the Emscripten SDK first")
+
     compat_obj = os.path.join(WORK_DIR, "web_compat.o")
     subprocess.check_call([
-        "emcc", os.path.join(ROOT, "engine", "web_compat.cpp"),
+        emcc, os.path.join(WEBGPU_SRC, "web_compat.cpp"),
         "-c", "-O2", "-std=c++17", "-fexceptions",
         "-I", os.path.join(ROOT, "blitz3d-ng", "src", "modules"),
         "-I", os.path.join(ROOT, "blitz3d-ng", "src", "modules", "bb", "pixmap"),
         "-I", os.path.join(ROOT, "blitz3d-ng", "src"),
-        "-I", os.path.join(ROOT, "engine"),
+        "-I", WEBGPU_SRC,
         "-o", compat_obj,
     ])
 
@@ -65,7 +71,7 @@ def main():
     env["SCPCB_COMPAT_OBJ"] = compat_obj
     env["SCPCB_EMCC_EXTRA"] = (
         f"--pre-js {assets_js} -sSTACK_SIZE=16777216 -sASYNCIFY_STACK_SIZE=1048576 "
-        f"-sGROWABLE_ARRAYBUFFERS=0 --profiling-funcs {perf_flags}"
+        f"-sDEFAULT_TO_CXX -sGROWABLE_ARRAYBUFFERS=0 --profiling-funcs {perf_flags}"
     )
 
     out = os.path.join(WORK_DIR, "scpcb")
