@@ -17,9 +17,9 @@
   #picker { display:none; flex-direction:column; gap:10px; width:min(400px, 84vw); }
   #picker button { all:unset; box-sizing:border-box; cursor:pointer; padding:14px 16px; color:#fff;
                    font:500 15px/1.4 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                   letter-spacing:0.06em; border:1px solid rgba(255,255,255,0.15); border-radius:2px;
-                   transition:border-color .15s ease-out; }
-  #picker button:hover, #picker button:focus-visible { border-color:#fff; }
+                   letter-spacing:0.06em; border:1px solid rgba(255,255,255,0.15); border-radius:14px;
+                   transition:border-color .15s ease-out, background-color .15s ease-out; }
+  #picker button:hover, #picker button:focus-visible { border-color:#fff; background-color:rgba(255,255,255,0.06); }
 </style>
 </head>
 <body>
@@ -322,10 +322,10 @@
   addEventListener('unhandledrejection', (ev) => { if (isWasmFailure(ev.reason)) fail('The game stopped.\n' + ev.reason.message); });
 
   const RESOLUTIONS = [
-    { w: 1280, h: 720,  label: '720p - Chromebooks' },
-    { w: 1920, h: 1080, label: '1080p - Most laptops and monitors' },
-    { w: 2560, h: 1440, label: '1440p - Gaming monitors and fast laptops' },
-    { w: 3840, h: 2160, label: '2160p (4K) - 4K screens, needs a strong GPU' },
+    { w: 1280, h: 720,  label: '720p - Chromebooks and budget laptops' },
+    { w: 1920, h: 1080, label: '1080p - Everyday laptops and PCs' },
+    { w: 2560, h: 1440, label: '1440p - Gaming laptops and desktops' },
+    { w: 3840, h: 2160, label: '2160p (4K) - High-end gaming PCs' },
   ];
   const RESOLUTION_KEY = 'scpcb.resolution';
 
