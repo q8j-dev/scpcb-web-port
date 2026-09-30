@@ -237,9 +237,6 @@ def step_llvm():
 
 def step_blitzcc():
     log("blitzcc (native compiler)")
-    if os.path.isfile(BLITZCC):
-        print("  already built, skipping")
-        return
     if not llvm_present():
         sys.exit("error: LLVM missing, run: python3 build.py llvm")
     load_msvc_env()
@@ -270,10 +267,6 @@ def emscripten_tools():
 
 def step_runtime():
     log("WebGPU runtime libraries (wasm)")
-    lib = os.path.join(NG, "_release_webgpu", "bin", "wasm32-unknown-emscripten", "lib")
-    if os.path.isdir(lib) and os.listdir(lib):
-        print("  already built, skipping")
-        return
     load_msvc_env()
     emcmake = emscripten_tools()[0]
     need("cmake", "Install CMake.")
