@@ -16,7 +16,7 @@
 #include <emscripten.h>
 
 #define NUM_BUFFERS 8
-#define BUFFER_SIZE 8192
+#define BUFFER_SIZE 32768
 #define EM_PUMP_NORMAL_MS 30
 #define EM_PUMP_URGENT_MS 10
 

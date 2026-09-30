@@ -952,14 +952,17 @@ bool WebGPUContextDriver::graphicsLost(){
 	return false;
 }
 
+static double bb_last_raf_ms=0;
+
 void WebGPUContextDriver::flip( bool vwait ){
 	WebGPUGraphics *g=(WebGPUGraphics*)graphics;
 	if( !g ) return;
 
 	g->present();
 
-	if( vwait ){
+	if( vwait || emscripten_get_now()-bb_last_raf_ms>=16.0 ){
 		bbWebGPURafYield();
+		bb_last_raf_ms=emscripten_get_now();
 	}else{
 		emscripten_sleep( 0 );
 	}
