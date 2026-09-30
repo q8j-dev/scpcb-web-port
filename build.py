@@ -11,7 +11,9 @@ also Visual Studio 2022 with the C++ and MFC components (the script finds it
 for you, no special prompt needed).
 """
 import argparse
+import configparser
 import glob
+import json
 import os
 import platform
 import shutil
@@ -131,9 +133,60 @@ def extract_zip_keep_modes(zip_path, dest):
 
 # ---------------------------------------------------------------- steps
 
+UPSTREAM_URL = "https://github.com/blitz3d-ng/blitz3d-ng.git"
+# blitz3d-ng/deps isn't kept in this repo. Clone upstream blitz3d-ng with its
+# pinned submodule commits and copy its deps/ tree into place.
+GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+DEPS_MARKERS = [
+    os.path.join("zlib", "tree"),
+    os.path.join("sdl", "tree"),
+    os.path.join("wxwidgets", "tree"),
+    os.path.join("freeimage", "src"),
+]
+
+
+def git(cmd, timeout, **kw):
+    print("  $", " ".join(cmd), flush=True)
+    try:
+        subprocess.run(cmd, check=True, timeout=timeout, env=GIT_ENV, **kw)
+    except subprocess.TimeoutExpired:
+        sys.exit(f"error: timed out after {timeout}s running: {' '.join(cmd)}")
+
+
 def step_deps():
     log("dependency sources")
-    run([sys.executable, os.path.join(ROOT, "tools", "fetch_blitz3d_ng_deps.py")])
+    deps_dir = os.path.join(NG, "deps")
+    if all(os.path.isdir(os.path.join(deps_dir, p)) and os.listdir(os.path.join(deps_dir, p))
+           for p in DEPS_MARKERS):
+        print("  already present, skipping")
+        return
+
+    with tempfile.TemporaryDirectory() as tmp:
+        clone = os.path.join(tmp, "blitz3d-ng")
+        git(["git", "clone", "--depth", "1", UPSTREAM_URL, clone], 120)
+
+        cfg = configparser.ConfigParser()
+        with open(os.path.join(clone, ".gitmodules"), encoding="utf-8") as f:
+            cfg.read_string(f.read().replace('[submodule "', "[").replace('"]', "]"))
+        # deps/llvm is only needed to build LLVM, which step_llvm does itself
+        paths = [cfg[sec]["path"] for sec in cfg.sections() if cfg[sec]["path"] != "deps/llvm"]
+
+        for path in paths:
+            timeout = 600 if path == "deps/wxwidgets/tree" else 180
+            git(["git", "submodule", "update", "--init", "--recursive", "--depth", "1",
+                 "--jobs", "4", "--", path], timeout, cwd=clone)
+
+        for name in os.listdir(os.path.join(clone, "deps")):
+            if name == "llvm":
+                continue
+            for sub in ("tree", "src"):
+                src = os.path.join(clone, "deps", name, sub)
+                if os.path.isdir(src):
+                    dst = os.path.join(deps_dir, name, sub)
+                    if os.path.isdir(dst):
+                        shutil.rmtree(dst)
+                    print(f"  {name}/{sub}")
+                    shutil.copytree(src, dst)
 
 
 def llvm_present():
@@ -212,7 +265,7 @@ def emscripten_tools():
         sys.exit("error: Emscripten not found. Install the emsdk "
                  "(https://emscripten.org/docs/getting_started/downloads.html) "
                  "and activate it in this terminal (emsdk_env), then re-run.")
-    return emcmake
+    return emcmake, emcc
 
 
 def step_runtime():
@@ -222,7 +275,7 @@ def step_runtime():
         print("  already built, skipping")
         return
     load_msvc_env()
-    emcmake = emscripten_tools()
+    emcmake = emscripten_tools()[0]
     need("cmake", "Install CMake.")
     need("ninja", "Install Ninja.")
     os.makedirs(WASM_BUILD, exist_ok=True)
@@ -233,18 +286,144 @@ def step_runtime():
     run(["cmake", "--build", WASM_BUILD, "-j", jobs()])
 
 
+GAME_DIR = os.path.join(ROOT, "upstream-scpcb")
+STAGE_DIR = os.path.join(tempfile.gettempdir(), "scpcb-web")
+WORK_DIR = os.path.join(tempfile.gettempdir(), "scpcb-web-webgpu")
+PACKAGED_DIRS = ["Data", "GFX", "SFX", "Loadingscreens"]
+PACKAGED_FILES = ["defaults.ini"]
+WEBGPU_SRC = os.path.join(NG, "src", "modules", "bb", "graphics.webgpu")
+
+
+def find_file_packager():
+    emcc = shutil.which("emcc")
+    if emcc:
+        candidate = os.path.join(os.path.dirname(os.path.realpath(emcc)), "tools", "file_packager.py")
+        if os.path.isfile(candidate):
+            return candidate
+    emsdk = os.environ.get("EMSDK")
+    if emsdk:
+        hits = glob.glob(os.path.join(emsdk, "upstream", "emscripten", "tools", "file_packager.py"))
+        if hits:
+            return hits[0]
+    for pattern in (
+        "/opt/homebrew/Cellar/emscripten/*/libexec/tools/file_packager.py",
+        "/usr/local/Cellar/emscripten/*/libexec/tools/file_packager.py",
+        "/usr/lib/emscripten/tools/file_packager.py",
+        "/usr/share/emscripten/tools/file_packager.py",
+    ):
+        hits = glob.glob(pattern)
+        if hits:
+            return hits[0]
+    sys.exit("error: file_packager.py not found. Activate the Emscripten SDK.")
+
+
 def step_pack():
     log("packaging game assets")
     emscripten_tools()
-    run([sys.executable, os.path.join(ROOT, "tools", "pack_monolith.py")])
+    entries = []
+    for d in PACKAGED_DIRS:
+        base = os.path.join(GAME_DIR, d)
+        if not os.path.isdir(base):
+            print(f"  warning: missing directory {base}")
+            continue
+        for dirpath, _dirs, files in os.walk(base):
+            for fn in files:
+                ap = os.path.join(dirpath, fn)
+                entries.append((os.path.relpath(ap, GAME_DIR).replace(os.sep, "/"), ap))
+    for f in PACKAGED_FILES:
+        ap = os.path.join(GAME_DIR, f)
+        if os.path.isfile(ap):
+            entries.append((f, ap))
+        else:
+            print(f"  warning: missing file {ap}")
+    entries.sort()
+
+    stage = os.path.join(STAGE_DIR, "stage-monolith")
+    if os.path.isdir(stage):
+        shutil.rmtree(stage)
+    for vp, ap in entries:
+        dst = os.path.join(stage, vp)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if SYSTEM == "Windows":
+            try:
+                os.link(ap, dst)
+            except OSError:
+                shutil.copy2(ap, dst)
+        else:
+            os.symlink(ap, dst)
+
+    run([sys.executable, find_file_packager(), os.path.join(STAGE_DIR, "assets.data"),
+         "--preload", f"{stage}@/", f"--js-output={os.path.join(STAGE_DIR, 'assets.js')}",
+         "--no-node"], cwd=GAME_DIR)
+    shutil.rmtree(stage)
 
 
 def step_game():
     log("compiling and linking the game")
-    emscripten_tools()
+    emcc = emscripten_tools()[1]
     if not os.path.isfile(BLITZCC):
         sys.exit("error: blitzcc missing, run: python3 build.py blitzcc")
-    run([sys.executable, os.path.join(ROOT, "build_game_webgpu.py")])
+    assets_js = os.path.join(STAGE_DIR, "assets.js")
+    assets_data = os.path.join(STAGE_DIR, "assets.data")
+    if not os.path.isfile(assets_js) or not os.path.isfile(assets_data):
+        sys.exit("error: packaged assets missing, run: python3 build.py pack")
+    os.makedirs(WORK_DIR, exist_ok=True)
+
+    compat_obj = os.path.join(WORK_DIR, "web_compat.o")
+    run([emcc, os.path.join(WEBGPU_SRC, "web_compat.cpp"),
+         "-c", "-O2", "-std=c++17", "-fexceptions",
+         "-I", os.path.join(NG, "src", "modules"),
+         "-I", os.path.join(NG, "src", "modules", "bb", "pixmap"),
+         "-I", os.path.join(NG, "src"),
+         "-I", WEBGPU_SRC,
+         "-o", compat_obj])
+
+    main_bb = os.path.join(GAME_DIR, "Main.bb")
+    with open(main_bb, "r", encoding="utf-8", errors="surrogateescape") as f:
+        body = f.read()
+    if not body.startswith('Include "WebShims.bb"'):
+        with open(main_bb, "w", encoding="utf-8", errors="surrogateescape") as f:
+            f.write('Include "WebShims.bb"\n' + body)
+
+    debug = os.environ.get("SCPCB_DEBUG", "0") == "1"
+    perf_flags = "-O2 -sASSERTIONS=1" if debug else \
+        "-O3 -sASSERTIONS=0 -sGL_TRACK_ERRORS=0 -sINITIAL_MEMORY=536870912"
+    env = os.environ.copy()
+    env["LLVM_ROOT"] = os.path.join(NG, "llvm")
+    env["blitzpath"] = os.path.join(NG, "_release_webgpu")
+    env["SCPCB_WEBGPU"] = "1"
+    env["SCPCB_LIB_DIR"] = os.path.join(
+        NG, "_release_webgpu", "bin", "wasm32-unknown-emscripten", "lib")
+    env["SCPCB_COMPAT_OBJ"] = compat_obj
+    env["SCPCB_EMCC_EXTRA"] = (
+        f"--pre-js {assets_js} -sSTACK_SIZE=16777216 -sASYNCIFY_STACK_SIZE=1048576 "
+        f"-sDEFAULT_TO_CXX -sGROWABLE_ARRAYBUFFERS=0 --profiling-funcs {perf_flags}")
+
+    out = os.path.join(WORK_DIR, "scpcb")
+    run([BLITZCC, "-target", "emscripten", "-o", out, "Main.bb"], cwd=GAME_DIR, env=env)
+
+    deploy = os.path.join(ROOT, "webgame")
+    os.makedirs(deploy, exist_ok=True)
+    for old in os.listdir(deploy):
+        if old in ("scpcb.js", "scpcb.wasm", "assets.manifest.json") or old.startswith("assets.data"):
+            os.remove(os.path.join(deploy, old))
+    shutil.copy(out + ".js", deploy)
+    shutil.copy(out + ".wasm", deploy)
+    shutil.copy(os.path.join(ROOT, "web-shell", "index.html"), os.path.join(deploy, "index.html"))
+
+    chunk_size = 24 * 1024 * 1024
+    parts = []
+    with open(assets_data, "rb") as src:
+        while True:
+            chunk = src.read(chunk_size)
+            if not chunk:
+                break
+            name = f"assets.data.{len(parts):03d}"
+            with open(os.path.join(deploy, name), "wb") as f:
+                f.write(chunk)
+            parts.append(name)
+    with open(os.path.join(deploy, "assets.manifest.json"), "w") as f:
+        json.dump({"size": os.path.getsize(assets_data), "chunkSize": chunk_size, "parts": parts}, f)
 
 
 def main():

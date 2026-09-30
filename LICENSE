@@ -3,7 +3,7 @@ MIT License
 Copyright (c) 2026 the scpcb-web-port contributors
 
 This license applies only to the original code contributed in this repository:
-the web-port glue (`web-shell/`, `tools/`, `build.py`, `build_game_webgpu.py`)
+the web-port glue (`web-shell/` and `build.py`)
 and the WebGPU rendering backend added to blitz3d-ng
 (`blitz3d-ng/src/modules/bb/graphics.webgpu`). It does not apply to vendored
 or checked-out third-party projects, which retain their own licensing:
