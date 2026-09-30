@@ -348,6 +348,7 @@ BBLIB void BBCALL bbTextureBumpEnvOffset( Texture *t,bb_float_t envoffset ){
 }
 
 BBLIB void BBCALL bbTextureLodBias( bb_float_t bias ){
+	bbScene->setTextureLodBias( bias );
 }
 
 BBLIB void BBCALL bbTextureCoords( Texture *t,bb_int_t flags ){

@@ -14,6 +14,7 @@ struct BBFrameState {
   view : mat4x4<f32>,
   lights : array<BBLightData,8>,
   lights_used : i32,
+  lod_bias : f32,
 };
 
 struct BBTexState {
@@ -223,14 +224,14 @@ fn combine( t0 : vec4<f32>, t1 : vec4<f32>, mode : i32, has_alpha : i32 ) -> vec
 fn fs_main( v : BBVertexOut ) -> @location(0) vec4<f32> {
   var color = v.color;
 
-  if( 0<RS.texs_used ){ color = combine( color, textureSample( bbTexture0,bbSampler0,v.tc01.xy ), RS.texs[0].blend, RS.texs[0].alpha ); }
-  if( 1<RS.texs_used ){ color = combine( color, textureSample( bbTexture1,bbSampler1,v.tc01.zw ), RS.texs[1].blend, RS.texs[1].alpha ); }
-  if( 2<RS.texs_used ){ color = combine( color, textureSample( bbTexture2,bbSampler2,v.tc23.xy ), RS.texs[2].blend, RS.texs[2].alpha ); }
-  if( 3<RS.texs_used ){ color = combine( color, textureSample( bbTexture3,bbSampler3,v.tc23.zw ), RS.texs[3].blend, RS.texs[3].alpha ); }
-  if( 4<RS.texs_used ){ color = combine( color, textureSample( bbTexture4,bbSampler4,v.tc45.xy ), RS.texs[4].blend, RS.texs[4].alpha ); }
-  if( 5<RS.texs_used ){ color = combine( color, textureSample( bbTexture5,bbSampler5,v.tc45.zw ), RS.texs[5].blend, RS.texs[5].alpha ); }
-  if( 6<RS.texs_used ){ color = combine( color, textureSample( bbTexture6,bbSampler6,v.tc67.xy ), RS.texs[6].blend, RS.texs[6].alpha ); }
-  if( 7<RS.texs_used ){ color = combine( color, textureSample( bbTexture7,bbSampler7,v.tc67.zw ), RS.texs[7].blend, RS.texs[7].alpha ); }
+  if( 0<RS.texs_used ){ color = combine( color, textureSampleBias( bbTexture0,bbSampler0,v.tc01.xy,FS.lod_bias ), RS.texs[0].blend, RS.texs[0].alpha ); }
+  if( 1<RS.texs_used ){ color = combine( color, textureSampleBias( bbTexture1,bbSampler1,v.tc01.zw,FS.lod_bias ), RS.texs[1].blend, RS.texs[1].alpha ); }
+  if( 2<RS.texs_used ){ color = combine( color, textureSampleBias( bbTexture2,bbSampler2,v.tc23.xy,FS.lod_bias ), RS.texs[2].blend, RS.texs[2].alpha ); }
+  if( 3<RS.texs_used ){ color = combine( color, textureSampleBias( bbTexture3,bbSampler3,v.tc23.zw,FS.lod_bias ), RS.texs[3].blend, RS.texs[3].alpha ); }
+  if( 4<RS.texs_used ){ color = combine( color, textureSampleBias( bbTexture4,bbSampler4,v.tc45.xy,FS.lod_bias ), RS.texs[4].blend, RS.texs[4].alpha ); }
+  if( 5<RS.texs_used ){ color = combine( color, textureSampleBias( bbTexture5,bbSampler5,v.tc45.zw,FS.lod_bias ), RS.texs[5].blend, RS.texs[5].alpha ); }
+  if( 6<RS.texs_used ){ color = combine( color, textureSampleBias( bbTexture6,bbSampler6,v.tc67.xy,FS.lod_bias ), RS.texs[6].blend, RS.texs[6].alpha ); }
+  if( 7<RS.texs_used ){ color = combine( color, textureSampleBias( bbTexture7,bbSampler7,v.tc67.zw,FS.lod_bias ), RS.texs[7].blend, RS.texs[7].alpha ); }
 
   if( RS.fog_mode>0 ){
     let fog_color = vec4<f32>( RS.fog_color.rgb, color.a );

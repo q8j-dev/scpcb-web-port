@@ -66,7 +66,9 @@ int BBCALL bbStart( int argc,char *argv[], BBMAIN bbMain ) {
 #else
 		bool debug=webDebugEnabled();
 #endif
-		return bbruntime_run( bbMain,debug )?0:1;
+		bool ok=bbruntime_run( bbMain,debug );
+		if( ok ) std::cout<<"[game ended]"<<std::endl;
+		return ok?0:1;
 	} catch( bbEx &x ) {
 		std::cout<<"[bbEx uncaught] "<<x.err<<std::endl;
 		return 1;

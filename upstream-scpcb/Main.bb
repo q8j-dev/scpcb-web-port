@@ -7812,7 +7812,7 @@ Function DrawMenu()
 					y=y+50*MenuScale
 					Color 100,100,100
 					Text(x, y, I_Loc\OptionName_Vram)	
-					EnableVRam = DrawTick(x + 270 * MenuScale, y + MenuScale, EnableVRam, True)
+					EnableVRam = DrawTick(x + 270 * MenuScale, y + MenuScale, False, True)
 					If MouseOn(x + 270 * MenuScale, y + MenuScale, 20*MenuScale,20*MenuScale) And OnSliderID=0
 						DrawOptionsTooltip(tx,ty,tw,th,"vram")
 					EndIf
@@ -7916,7 +7916,7 @@ Function DrawMenu()
 					
 					Color 100,100,100
 					Text x, y, I_Loc\OptionName_Usertrack
-					EnableUserTracks = DrawTick(x + 270 * MenuScale, y + MenuScale, EnableUserTracks,True)
+					EnableUserTracks = DrawTick(x + 270 * MenuScale, y + MenuScale, False, True)
 					If MouseOn(x+270*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale) And OnSliderID=0
 						DrawOptionsTooltip(tx,ty,tw,th,"usertrack")
 					EndIf
@@ -8083,7 +8083,7 @@ Function DrawMenu()
 
 					Color 255,255,255
 					Text(x, y, I_Loc\OptionName_Launcher)
-					LauncherEnabled% = DrawTick(x + 270 * MenuScale, y, LauncherEnabled%)
+					LauncherEnabled% = DrawTick(x + 270 * MenuScale, y, False, True)
 					If MouseOn(x+270*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale) And OnSliderID=0
 						DrawOptionsTooltip(tx,ty,tw,th,"launcher")
 					EndIf

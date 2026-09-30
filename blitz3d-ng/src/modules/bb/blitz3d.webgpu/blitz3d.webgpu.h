@@ -19,7 +19,8 @@ struct BBWebGPUFrameState{
 		float params[4];
 	}lights[8];
 	int32_t lights_used;
-	int32_t _pad[3];
+	float lod_bias;
+	int32_t _pad[2];
 };
 static_assert( sizeof(BBWebGPUFrameState)==656,"BBFrameState layout mismatch" );
 

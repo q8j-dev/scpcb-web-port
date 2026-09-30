@@ -67,6 +67,10 @@ bb_int_t BBCALL bbExecFile( BBStr *f ){
 	std::string t=*f;delete f;
 	if( !t.size() ) return false;
 	if( !bbRuntimeIdle() ) RTEX( 0 );
+	if( t.compare( 0,7,"http://" )==0||t.compare( 0,8,"https://" )==0 ){
+		EM_ASM( { window.open( UTF8ToString( $0 ),'_blank','noopener' ); },t.c_str() );
+		return 1;
+	}
 	return 0;
 }
 

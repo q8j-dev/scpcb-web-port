@@ -48,11 +48,47 @@ fn ditherNoise( p : vec2<f32> ) -> f32 {
   return a + b - 1.0;
 }
 
+fn luma( c : vec3<f32> ) -> f32 {
+  return dot( c, vec3<f32>( 0.299, 0.587, 0.114 ) );
+}
+
+fn fxaa( uv : vec2<f32> ) -> vec4<f32> {
+  let texel = 1.0 / vec2<f32>( textureDimensions( u_tex ) );
+  let m = textureSampleLevel( u_tex, u_sampler, uv, 0.0 );
+  let nw = textureSampleLevel( u_tex, u_sampler, uv + vec2<f32>( -1.0, -1.0 ) * texel, 0.0 ).rgb;
+  let ne = textureSampleLevel( u_tex, u_sampler, uv + vec2<f32>( 1.0, -1.0 ) * texel, 0.0 ).rgb;
+  let sw = textureSampleLevel( u_tex, u_sampler, uv + vec2<f32>( -1.0, 1.0 ) * texel, 0.0 ).rgb;
+  let se = textureSampleLevel( u_tex, u_sampler, uv + vec2<f32>( 1.0, 1.0 ) * texel, 0.0 ).rgb;
+  let lnw = luma( nw );
+  let lne = luma( ne );
+  let lsw = luma( sw );
+  let lse = luma( se );
+  let lm = luma( m.rgb );
+  let lmin = min( lm, min( min( lnw, lne ), min( lsw, lse ) ) );
+  let lmax = max( lm, max( max( lnw, lne ), max( lsw, lse ) ) );
+  var dir = vec2<f32>( -( ( lnw + lne ) - ( lsw + lse ) ), ( lnw + lsw ) - ( lne + lse ) );
+  let reduce = max( ( lnw + lne + lsw + lse ) * 0.03125, 1.0 / 128.0 );
+  let rcp = 1.0 / ( min( abs( dir.x ), abs( dir.y ) ) + reduce );
+  dir = clamp( dir * rcp, vec2<f32>( -8.0 ), vec2<f32>( 8.0 ) ) * texel;
+  let a = 0.5 * ( textureSampleLevel( u_tex, u_sampler, uv + dir * ( 1.0 / 3.0 - 0.5 ), 0.0 ).rgb
+                + textureSampleLevel( u_tex, u_sampler, uv + dir * ( 2.0 / 3.0 - 0.5 ), 0.0 ).rgb );
+  let b = a * 0.5 + 0.25 * ( textureSampleLevel( u_tex, u_sampler, uv + dir * -0.5, 0.0 ).rgb
+                           + textureSampleLevel( u_tex, u_sampler, uv + dir * 0.5, 0.0 ).rgb );
+  let lb = luma( b );
+  if( lb < lmin || lb > lmax ){
+    return vec4<f32>( a, m.a );
+  }
+  return vec4<f32>( b, m.a );
+}
+
 @fragment
 fn fs_main( v : BBPerVertex ) -> @location(0) vec4<f32> {
   if( RS.texenabled>=1 ){
     var c = textureSample( u_tex,u_sampler,v.texcoord ) * vec4<f32>( v.color,1.0 );
-    if( RS.texenabled==2 ){
+    if( RS.texenabled==3 ){
+      c = fxaa( v.texcoord ) * vec4<f32>( v.color,1.0 );
+    }
+    if( RS.texenabled>=2 ){
       c = vec4<f32>( c.rgb + ditherNoise( v.position.xy ) / 255.0, c.a );
     }
     return c;

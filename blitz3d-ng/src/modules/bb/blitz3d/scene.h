@@ -70,6 +70,7 @@ protected:
   virtual void setHWMultiTex( bool enable )=0;
   virtual void setDither( bool enable )=0;
   virtual void setAntialias( bool enable )=0;
+  virtual void setTextureLodBias( float bias ){}
   virtual void setWireframe( bool enable )=0;
   virtual void setFlippedTris( bool enable )=0;
   virtual void setAmbient( const float rgb[3] )=0;

@@ -301,7 +301,22 @@
   const FATAL_LINE = /^\[(RuntimeError|bbEx uncaught|std::exception|unknown exception)\]|device lost \((1|4)\)/;
   let stopLines = null;
 
+  function ended() {
+    if (failed) return;
+    failed = true;
+    document.getElementById('bar').style.display = 'none';
+    document.getElementById('picker').style.display = 'none';
+    pctEl.style.display = 'none';
+    loading.style.display = 'flex';
+    const b = document.createElement('button');
+    b.textContent = 'PLAY AGAIN';
+    b.style.cssText = 'all:unset;cursor:pointer;padding:14px 28px;color:#fff;letter-spacing:0.06em;border:1px solid rgba(255,255,255,0.15);border-radius:14px;font:500 15px/1.4 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;';
+    b.onclick = () => location.reload();
+    loading.appendChild(b);
+  }
+
   function watch(line) {
+    if (line === '[game ended]') { setTimeout(ended, 300); return; }
     if (stopLines) { stopLines.push(line); return; }
     if (!FATAL_LINE.test(line)) return;
     stopLines = [line];

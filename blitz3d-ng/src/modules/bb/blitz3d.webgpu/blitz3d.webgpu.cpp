@@ -824,7 +824,12 @@ public:
 	void setWBuffer( bool enable ){}
 	void setHWMultiTex( bool enable ){}
 	void setDither( bool enable ){}
-	void setAntialias( bool enable ){}
+	void setAntialias( bool enable ){ res->antialias=enable; }
+
+	void setTextureLodBias( float bias ){
+		frame.lod_bias=bias;
+		frame_dirty=true;
+	}
 
 	void setWireframe( bool enable ){
 		wireframe=enable;

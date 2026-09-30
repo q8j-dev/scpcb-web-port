@@ -54,6 +54,7 @@ struct WebGPUContextResources{
 	WGPUDevice device=0;
 	WGPUQueue queue=0;
 	WGPUSurface surface=0;
+	bool antialias=false;
 	WGPUTextureFormat surface_format=WGPUTextureFormat_BGRA8Unorm;
 	int surface_width=0,surface_height=0;
 
