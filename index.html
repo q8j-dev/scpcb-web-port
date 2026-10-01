@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SCP – Containment Breach</title>
+<link rel="icon" href="data:,">
+<style>
+  html,body { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; }
+  #wrap { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:#000; }
+  #canvas { display:block; background:#000; outline:none; }
+  #loading { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
+             justify-content:center; background:#000; z-index:5; }
+  #pct { color:#fff; font:500 15px/1 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         margin-bottom:14px; letter-spacing:0.06em; font-variant-numeric:tabular-nums; }
+  #bar { width:min(340px, 60vw); height:3px; background:rgba(255,255,255,0.15); border-radius:2px; overflow:hidden; }
+  #barfill { height:100%; width:0%; background:#fff; border-radius:2px; transition:width .25s ease-out; }
+  #picker { display:none; flex-direction:column; gap:10px; width:min(400px, 84vw); }
+  #picker button { all:unset; box-sizing:border-box; cursor:pointer; padding:14px 16px; color:#fff;
+                   font:500 15px/1.4 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                   letter-spacing:0.06em; border:1px solid rgba(255,255,255,0.15); border-radius:14px;
+                   transition:border-color .15s ease-out, background-color .15s ease-out; }
+  #picker button:hover, #picker button:focus-visible { border-color:#fff; background-color:rgba(255,255,255,0.06); }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas></div>
+<div id="loading"><div id="picker"></div><div id="pct">0%</div><div id="bar"><div id="barfill"></div></div></div>
+<script>
+  const canvas = document.getElementById('canvas');
+  const loading = document.getElementById('loading');
+  const barfill = document.getElementById('barfill');
+  const pctEl = document.getElementById('pct');
+
+  function fit(){
+    const gw = canvas.width || 1280, gh = canvas.height || 720;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const s = Math.min(vw / gw, vh / gh);
+    canvas.style.width  = Math.round(gw * s) + 'px';
+    canvas.style.height = Math.round(gh * s) + 'px';
+  }
+  new MutationObserver(fit).observe(canvas, { attributes: true, attributeFilter: ['width', 'height'] });
+  fit();
+  addEventListener('resize', fit);
+  addEventListener('fullscreenchange', fit);
+
+  addEventListener('keydown', (e) => {
+    if (e.altKey && e.code === 'Enter' && !e.repeat) {
+      e.preventDefault();
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+    }
+  }, true);
+  canvas.addEventListener('mousedown', () => { canvas.focus(); });
+
+  const rpl = canvas.requestPointerLock ? canvas.requestPointerLock.bind(canvas) : null;
+  canvas.requestPointerLock = function(){
+    try {
+      const p = rpl ? rpl() : undefined;
+      if (p && p.catch) p.catch(() => {});
+    } catch (e) {}
+  };
+  const epl = document.exitPointerLock ? document.exitPointerLock.bind(document) : null;
+  let gameReleasedLock = false;
+  let lastRealEscape = 0;
+
+  document.exitPointerLock = function(){
+    if (document.pointerLockElement) gameReleasedLock = true;
+    try { if (epl) epl(); } catch (e) {}
+  };
+
+  addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && e.isTrusted) lastRealEscape = performance.now();
+  }, true);
+
+  function pressEscape() {
+    const init = { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true };
+    document.dispatchEvent(new KeyboardEvent('keydown', init));
+    setTimeout(() => document.dispatchEvent(new KeyboardEvent('keyup', init)), 60);
+  }
+
+  document.addEventListener('pointerlockchange', () => {
+    if (document.pointerLockElement === canvas) return;
+    if (gameReleasedLock) { gameReleasedLock = false; return; }
+    if (performance.now() - lastRealEscape < 300) return;
+    pressEscape();
+  });
+
+  const DB_NAME = 'scpcb';
+  const DB_STORE = 'kv';
+  const persisted = { db: null, options: null, saves: {} };
+
+  const idbOpen = () => new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  const idbGet = (key) => new Promise((resolve) => {
+    try {
+      const req = persisted.db.transaction(DB_STORE).objectStore(DB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(undefined);
+    } catch (e) { resolve(undefined); }
+  });
+  const idbPut = (key, value) => new Promise((resolve) => {
+    try {
+      const tx = persisted.db.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).put(value, key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = tx.onabort = () => { console.warn('could not store ' + key, tx.error); resolve(false); };
+    } catch (e) { console.warn('could not store ' + key, e); resolve(false); }
+  });
+
+  const b64dec = (str) => {
+    const s = atob(str);
+    const b = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+    return b;
+  };
+
+  async function loadPersisted() {
+    try { persisted.db = await idbOpen(); } catch (e) { console.warn('IndexedDB unavailable, progress will not be saved', e); return; }
+    persisted.options = (await idbGet('options')) ?? null;
+    persisted.saves = (await idbGet('saves')) ?? {};
+
+    try {
+      const oldOptions = localStorage.getItem('scpcb.options');
+      const oldSaves = localStorage.getItem('scpcb.saves');
+      if (!oldOptions && !oldSaves) return;
+      if (persisted.options === null && oldOptions) persisted.options = oldOptions;
+      if (!Object.keys(persisted.saves).length && oldSaves) {
+        const tree = JSON.parse(oldSaves);
+        for (const p in tree) persisted.saves[p] = b64dec(tree[p]);
+      }
+      const ok = (persisted.options === null || await idbPut('options', persisted.options)) &&
+                 await idbPut('saves', persisted.saves);
+      if (ok) {
+        localStorage.removeItem('scpcb.options');
+        localStorage.removeItem('scpcb.saves');
+      }
+    } catch (e) {}
+  }
+
+  let maxPct = 0;
+  var Module = {
+    canvas: canvas,
+    print: (t) => { if (t) { console.log(t); watch(t); } },
+    printErr: (t) => { if (t) { console.error(t); watch(t); } },
+    setStatus: (t) => {
+      if (!t) { loading.style.display = 'none'; return; }
+      const m = /\((\d+(\.\d+)?)\/(\d+)\)/.exec(t);
+      if (m) {
+        const pct = Math.min(100, Math.round((parseFloat(m[1]) / parseFloat(m[3])) * 100));
+        if (pct >= maxPct) {
+          maxPct = pct;
+          barfill.style.width = pct + '%';
+          pctEl.textContent = pct + '%';
+        }
+      }
+    },
+    postRun: [ () => { console.log('[load] runtime up after ' + Math.round(performance.now()) + 'ms'); setTimeout(() => { loading.style.display = 'none'; }, 350); } ],
+    preRun: [ () => {
+      const LP = FS.lookupPath.bind(FS);
+      const cache = new Map();
+      const fix = (abs) => {
+        if (cache.has(abs)) return cache.get(abs);
+        let base = '/';
+        const out = [];
+        for (const comp of abs.split('/').filter(c => c && c !== '.')) {
+          const tryPath = (base === '/' ? '/' : base + '/') + comp;
+          let ok = false;
+          try { LP(tryPath, {}); ok = true; } catch (e) {}
+          if (ok) { out.push(comp); base = tryPath; continue; }
+          let names;
+          try { names = FS.readdir(base); } catch (e) { cache.set(abs, null); return null; }
+          const lc = comp.toLowerCase();
+          const m = names.find(n => n.toLowerCase() === lc);
+          if (!m) { cache.set(abs, null); return null; }
+          out.push(m);
+          base = (base === '/' ? '/' : base + '/') + m;
+        }
+        const fixed = '/' + out.join('/');
+        cache.set(abs, fixed);
+        return fixed;
+      };
+      const caseFixed = (path) => {
+        let abs = path;
+        if (typeof abs !== 'string' || !abs.startsWith('/')) {
+          const c = FS.cwd();
+          abs = (c === '/' ? '/' : c + '/') + abs;
+        }
+        return fix(abs);
+      };
+      const wrap = (obj, method) => {
+        const orig = obj[method].bind(obj);
+        obj[method] = function(path, ...rest){
+          try { return orig(path, ...rest); }
+          catch (e) {
+            if (!e || e.errno !== 44 || typeof path !== 'string') throw e;
+            const f = caseFixed(path);
+            if (f && f !== path) return orig(f, ...rest);
+            throw e;
+          }
+        };
+      };
+      wrap(FS, 'lookupPath');
+      wrap(FS, 'open');
+      wrap(FS, 'stat');
+      if (FS.lstat) wrap(FS, 'lstat');
+      if (FS.readdir) wrap(FS, 'readdir');
+    }, () => {
+      const OPTIONS_DIR = '/Undertow Games/SCP - Containment Breach';
+      const OPTIONS_PATH = OPTIONS_DIR + '/options.ini';
+      const mkdirp = (path) => {
+        const parts = path.split('/').filter(Boolean);
+        let cur = '';
+        for (const part of parts) { cur += '/' + part; try { FS.mkdir(cur); } catch (e) {} }
+      };
+      try {
+        mkdirp(OPTIONS_DIR);
+        const saved = persisted.options;
+        if (saved) FS.writeFile(OPTIONS_PATH, saved);
+        const resOf = (t) => {
+          const w = /^width *= *(\d+)/m.exec(t), h = /^height *= *(\d+)/m.exec(t);
+          return (w ? w[1] : '') + 'x' + (h ? h[1] : '');
+        };
+        let last = saved || null;
+        let bootRes = saved ? resOf(saved) : null;
+        setInterval(() => {
+          try {
+            const cur = FS.readFile(OPTIONS_PATH, { encoding: 'utf8' });
+            if (bootRes === null) bootRes = resOf(cur);
+            if (cur !== last) {
+              last = cur;
+              if (persisted.db) idbPut('options', cur);
+              if (resOf(cur) !== bootRes) location.reload();
+            }
+          } catch (e) {}
+        }, 1000);
+      } catch (e) {}
+
+      const walk = (dir, out) => {
+        let names;
+        try { names = FS.readdir(dir); } catch (e) { return; }
+        for (const n of names) {
+          if (n === '.' || n === '..') continue;
+          const p = dir + '/' + n;
+          let st;
+          try { st = FS.stat(p); } catch (e) { continue; }
+          if (FS.isDir(st.mode)) walk(p, out);
+          else if (FS.isFile(st.mode)) out[p] = st.size + ':' + +st.mtime;
+        }
+      };
+      try { FS.mkdir('/Saves'); } catch (e) {}
+      try {
+        for (const p in persisted.saves) {
+          mkdirp(p.slice(0, p.lastIndexOf('/')));
+          FS.writeFile(p, persisted.saves[p]);
+        }
+      } catch (e) {}
+      let lastSig = null;
+      const persistSaves = () => {
+        if (!persisted.db) return;
+        try {
+          const files = {};
+          walk('/Saves', files);
+          const sig = JSON.stringify(files);
+          if (sig === lastSig) return;
+          lastSig = sig;
+          if (sig === '{}') return;
+          const out = {};
+          for (const p in files) out[p] = FS.readFile(p);
+          idbPut('saves', out);
+        } catch (e) {
+          console.warn('could not store saves', e);
+        }
+      };
+      lastSig = (() => { const f = {}; walk('/Saves', f); return JSON.stringify(f); })();
+      setInterval(persistSaves, 4000);
+      addEventListener('pagehide', persistSaves);
+      document.addEventListener('visibilitychange', () => { if (document.hidden) persistSaves(); });
+    } ],
+  };
+
+  let failed = false;
+
+  function fail(t){
+    if (failed) return;
+    failed = true;
+    document.getElementById('bar').style.display = 'none';
+    document.getElementById('picker').style.display = 'none';
+    pctEl.style.display = 'none';
+    loading.style.display = 'flex';
+    const m = document.createElement('div');
+    m.style.cssText = 'color:#fff;max-width:520px;text-align:center;padding:0 24px;white-space:pre-wrap;font:500 15px/1.6 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;';
+    m.textContent = t;
+    loading.appendChild(m);
+  }
+
+  const FATAL_LINE = /^\[(RuntimeError|bbEx uncaught|std::exception|unknown exception)\]|device lost \((1|4)\)/;
+  let stopLines = null;
+
+  function ended() {
+    if (failed) return;
+    failed = true;
+    document.getElementById('bar').style.display = 'none';
+    document.getElementById('picker').style.display = 'none';
+    pctEl.style.display = 'none';
+    loading.style.display = 'flex';
+    const b = document.createElement('button');
+    b.textContent = 'PLAY AGAIN';
+    b.style.cssText = 'all:unset;cursor:pointer;padding:14px 28px;color:#fff;letter-spacing:0.06em;border:1px solid rgba(255,255,255,0.15);border-radius:14px;font:500 15px/1.4 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;';
+    b.onclick = () => location.reload();
+    loading.appendChild(b);
+  }
+
+  function watch(line) {
+    if (line === '[game ended]') { setTimeout(ended, 300); return; }
+    if (stopLines) { stopLines.push(line); return; }
+    if (!FATAL_LINE.test(line)) return;
+    stopLines = [line];
+    setTimeout(() => fail('The game stopped.\n' + stopLines.join('\n').slice(0, 600)), 300);
+  }
+
+  const gpuStats = { draws: 0, submits: 0, frames: 0 };
+  let lastSecond = { draws: 0, submits: 0, frames: 0 };
+  let idleSeconds = 0;
+
+  function watchGpu() {
+    if (typeof GPURenderPassEncoder === 'undefined') return;
+    for (const name of ['draw', 'drawIndexed']) {
+      const original = GPURenderPassEncoder.prototype[name];
+      GPURenderPassEncoder.prototype[name] = function (...args) { gpuStats.draws++; return original.apply(this, args); };
+    }
+    const submit = GPUQueue.prototype.submit;
+    GPUQueue.prototype.submit = function (...args) { gpuStats.submits++; return submit.apply(this, args); };
+    const tick = () => { gpuStats.frames++; requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+
+    setInterval(() => {
+      lastSecond = { ...gpuStats };
+      gpuStats.draws = gpuStats.submits = gpuStats.frames = 0;
+      const running = loading.style.display === 'none';
+      idleSeconds = running && lastSecond.frames > 10 && lastSecond.draws === 0 ? idleSeconds + 1 : 0;
+      if (idleSeconds === 3) console.warn('[shell] the game has drawn nothing for 3 seconds', window.scpcbStats());
+    }, 1000);
+  }
+
+  window.scpcbStats = () => ({
+    lastSecond,
+    canvas: [canvas.width, canvas.height],
+    visibility: document.visibilityState,
+    focused: document.hasFocus(),
+  });
+
+  const isWasmFailure = (e) => e instanceof WebAssembly.RuntimeError || e instanceof RangeError;
+  addEventListener('error', (ev) => { if (isWasmFailure(ev.error)) fail('The game stopped.\n' + ev.error.message); });
+  addEventListener('unhandledrejection', (ev) => { if (isWasmFailure(ev.reason)) fail('The game stopped.\n' + ev.reason.message); });
+
+  const RESOLUTIONS = [
+    { w: 1280, h: 720,  label: '720p - Chromebooks and budget laptops' },
+    { w: 1920, h: 1080, label: '1080p - Everyday laptops and PCs' },
+    { w: 2560, h: 1440, label: '1440p - Gaming laptops and desktops' },
+    { w: 3840, h: 2160, label: '2160p (4K) - High-end gaming PCs' },
+  ];
+  const RESOLUTION_KEY = 'scpcb.resolution';
+
+  function chooseResolution() {
+    return new Promise((resolve) => {
+      let last = 1;
+      try {
+        const saved = parseInt(localStorage.getItem(RESOLUTION_KEY), 10);
+        if (saved >= 0 && saved < RESOLUTIONS.length) last = saved;
+      } catch (e) {}
+
+      const box = document.getElementById('picker');
+      const buttons = RESOLUTIONS.map((r, i) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = r.label;
+        b.addEventListener('click', () => {
+          try { localStorage.setItem(RESOLUTION_KEY, String(i)); } catch (e) {}
+          box.style.display = 'none';
+          document.getElementById('bar').style.display = '';
+          pctEl.style.display = '';
+          resolve(r);
+        });
+        box.appendChild(b);
+        return b;
+      });
+      box.addEventListener('keydown', (ev) => {
+        const at = buttons.indexOf(document.activeElement);
+        if (ev.key === 'ArrowDown') buttons[(at + 1) % buttons.length].focus();
+        else if (ev.key === 'ArrowUp') buttons[(at + buttons.length - 1) % buttons.length].focus();
+        else return;
+        ev.preventDefault();
+      });
+
+      document.getElementById('bar').style.display = 'none';
+      pctEl.style.display = 'none';
+      box.style.display = 'flex';
+      buttons[last].focus();
+    });
+  }
+
+  function setIni(text, section, key, value) {
+    const lines = (text || '').split(/\r?\n/);
+    while (lines.length && lines[lines.length - 1] === '') lines.pop();
+    const header = '[' + section + ']';
+    const start = lines.findIndex((l) => l.trim().toLowerCase() === header.toLowerCase());
+    const entry = key + ' = ' + value;
+    if (start < 0) {
+      lines.push(header, entry);
+    } else {
+      let end = lines.length;
+      for (let i = start + 1; i < lines.length; i++) {
+        if (/^\s*\[/.test(lines[i])) { end = i; break; }
+      }
+      let done = false;
+      for (let i = start + 1; i < end && !done; i++) {
+        const eq = lines[i].indexOf('=');
+        if (eq > 0 && lines[i].slice(0, eq).trim().toLowerCase() === key.toLowerCase()) {
+          lines[i] = entry;
+          done = true;
+        }
+      }
+      if (!done) lines.splice(end, 0, entry);
+    }
+    return lines.join('\n') + '\n';
+  }
+
+  function withResolution(options, r) {
+    let text = options || '';
+    text = setIni(text, 'graphics', 'width', r.w);
+    text = setIni(text, 'graphics', 'height', r.h);
+    text = setIni(text, 'graphics', 'fullscreen', 'false');
+    text = setIni(text, 'graphics', 'borderless windowed', 'false');
+    return text;
+  }
+
+  const ASSET_CACHE = 'scpcb-assets';
+
+  async function openAssetCache() {
+    try {
+      return typeof caches === 'undefined' ? null : await caches.open(ASSET_CACHE);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function fetchPart(cache, part, writes) {
+    const url = part.name;
+    if (cache) {
+      const hit = await cache.match(url);
+      if (hit) {
+        const cached = new Uint8Array(await hit.arrayBuffer());
+        if (cached.length === part.size) return cached;
+        await cache.delete(url);
+      }
+    }
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(part.name + ': HTTP ' + r.status);
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    if (bytes.length !== part.size) throw new Error(part.name + ' has the wrong size');
+    if (cache) {
+      writes.push(cache.put(url, new Response(bytes)).catch((e) => console.warn('could not cache ' + part.name, e)));
+    }
+    return bytes;
+  }
+
+  async function loadAssets(manifest) {
+    const cache = await openAssetCache();
+    const buf = new Uint8Array(manifest.size);
+    const offsets = [];
+    let end = 0;
+    for (const part of manifest.parts) {
+      offsets.push(end);
+      end += part.size;
+    }
+    if (end !== manifest.size) throw new Error('assets.manifest.json is inconsistent');
+
+    const writes = [];
+    let loaded = 0, next = 0;
+    const worker = async () => {
+      while (next < manifest.parts.length) {
+        const i = next++;
+        const bytes = await fetchPart(cache, manifest.parts[i], writes);
+        buf.set(bytes, offsets[i]);
+        loaded += bytes.length;
+        const pct = Math.floor((loaded / manifest.size) * 100);
+        barfill.style.width = pct + '%';
+        pctEl.textContent = pct + '%';
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, manifest.parts.length) }, worker));
+
+    if (cache) {
+      const wanted = new Set(manifest.parts.map((p) => new URL(p.name, location.href).href));
+      Promise.all(writes)
+        .then(() => cache.keys())
+        .then((keys) => Promise.all(keys.filter((k) => !wanted.has(k.url)).map((k) => cache.delete(k))))
+        .catch(() => {});
+    }
+    return buf;
+  }
+
+  (async () => {
+    if (!navigator.gpu) {
+      fail('This game requires WebGPU. Use Chrome or Edge 113+, or Safari 26+, over HTTPS or localhost.');
+      return;
+    }
+    if (typeof WebAssembly.Suspending !== 'function' || typeof WebAssembly.promising !== 'function') {
+      fail('This game needs a newer browser. Use Chrome or Edge 137 or later.');
+      return;
+    }
+    let adapter = null;
+    try { adapter = await navigator.gpu.requestAdapter(); } catch (e) {}
+    if (!adapter) {
+      fail('WebGPU is available but no GPU adapter could be acquired on this system.');
+      return;
+    }
+    Module.onAbort = (w) => fail('Startup failed: ' + w);
+    watchGpu();
+
+    const resolution = await chooseResolution();
+
+    let manifest;
+    try {
+      const mf = await fetch('assets.manifest.json', { cache: 'no-cache' });
+      if (!mf.ok) throw new Error('assets.manifest.json: HTTP ' + mf.status);
+      manifest = await mf.json();
+    } catch (e) {
+      fail('Failed to load game assets: ' + e.message);
+      return;
+    }
+
+    const loadStart = performance.now();
+    try {
+      const buf = await loadAssets(manifest);
+      console.log('[load] assets ready in ' + Math.round(performance.now() - loadStart) + 'ms');
+      Module.getPreloadedPackage = () => buf.buffer;
+    } catch (e) {
+      fail('Failed to load game assets: ' + e.message);
+      return;
+    }
+
+    await loadPersisted();
+    persisted.options = withResolution(persisted.options, resolution);
+
+    Module.locateFile = (path, dir) => path.endsWith('.wasm') ? manifest.wasm : dir + path;
+    const loadScript = (src) => new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('could not load ' + src));
+      s.src = src;
+      document.body.appendChild(s);
+    });
+    try {
+      await loadScript(manifest.loader);
+      await loadScript(manifest.js);
+    } catch (e) {
+      fail('Failed to start the game: ' + e.message);
+    }
+  })();
+</script>
+</body>
+</html>
