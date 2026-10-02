@@ -112,6 +112,49 @@
     } catch (e) { console.warn('could not store ' + key, e); resolve(false); }
   });
 
+  const SAVE_PREFIX = 'save:';
+
+  const idbBatch = (puts, deletes) => new Promise((resolve) => {
+    try {
+      const tx = persisted.db.transaction(DB_STORE, 'readwrite');
+      const store = tx.objectStore(DB_STORE);
+      for (const key in puts) store.put(puts[key], key);
+      for (const key of deletes) store.delete(key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = tx.onabort = () => { console.warn('could not store saves', tx.error); resolve(false); };
+    } catch (e) { console.warn('could not store saves', e); resolve(false); }
+  });
+
+  const idbSaves = () => new Promise((resolve) => {
+    const out = {};
+    try {
+      const range = IDBKeyRange.bound(SAVE_PREFIX, SAVE_PREFIX + '￿');
+      const req = persisted.db.transaction(DB_STORE).objectStore(DB_STORE).openCursor(range);
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) { resolve(out); return; }
+        out[cursor.key.slice(SAVE_PREFIX.length)] = cursor.value;
+        cursor.continue();
+      };
+      req.onerror = () => resolve(out);
+    } catch (e) { resolve(out); }
+  });
+
+  const saveEntries = (saves) => {
+    const puts = {};
+    for (const p in saves) puts[SAVE_PREFIX + p] = saves[p];
+    return puts;
+  };
+
+  let persistRequested = false;
+  async function requestPersistence() {
+    if (persistRequested || !navigator.storage || !navigator.storage.persist) return;
+    persistRequested = true;
+    try {
+      if (!(await navigator.storage.persist())) console.warn('the browser did not grant persistent storage, saves may be evicted when disk space is low');
+    } catch (e) {}
+  }
+
   const b64dec = (str) => {
     const s = atob(str);
     const b = new Uint8Array(s.length);
@@ -122,7 +165,14 @@
   async function loadPersisted() {
     try { persisted.db = await idbOpen(); } catch (e) { console.warn('IndexedDB unavailable, progress will not be saved', e); return; }
     persisted.options = (await idbGet('options')) ?? null;
-    persisted.saves = (await idbGet('saves')) ?? {};
+    persisted.saves = await idbSaves();
+
+    const bundle = await idbGet('saves');
+    if (bundle) {
+      for (const p in bundle) if (!(p in persisted.saves)) persisted.saves[p] = bundle[p];
+      if (await idbBatch(saveEntries(persisted.saves), ['saves'])) console.log('[load] migrated saves to one entry per file');
+    }
+    if (Object.keys(persisted.saves).length) requestPersistence();
 
     try {
       const oldOptions = localStorage.getItem('scpcb.options');
@@ -134,7 +184,7 @@
         for (const p in tree) persisted.saves[p] = b64dec(tree[p]);
       }
       const ok = (persisted.options === null || await idbPut('options', persisted.options)) &&
-                 await idbPut('saves', persisted.saves);
+                 await idbBatch(saveEntries(persisted.saves), []);
       if (ok) {
         localStorage.removeItem('scpcb.options');
         localStorage.removeItem('scpcb.saves');
@@ -259,24 +309,33 @@
           FS.writeFile(p, persisted.saves[p]);
         }
       } catch (e) {}
-      let lastSig = null;
-      const persistSaves = () => {
-        if (!persisted.db) return;
+      const snapshot = () => {
+        const files = {};
+        walk('/Saves', files);
+        return files;
+      };
+      let known = snapshot();
+      let writing = false;
+      const persistSaves = async () => {
+        if (!persisted.db || writing) return;
         try {
-          const files = {};
-          walk('/Saves', files);
-          const sig = JSON.stringify(files);
-          if (sig === lastSig) return;
-          lastSig = sig;
-          if (sig === '{}') return;
-          const out = {};
-          for (const p in files) out[p] = FS.readFile(p);
-          idbPut('saves', out);
+          const now = snapshot();
+          const puts = {};
+          const deletes = [];
+          for (const p in now) if (known[p] !== now[p]) puts[SAVE_PREFIX + p] = FS.readFile(p);
+          for (const p in known) if (!(p in now)) deletes.push(SAVE_PREFIX + p);
+          if (!Object.keys(puts).length && !deletes.length) return;
+          writing = true;
+          if (await idbBatch(puts, deletes)) {
+            known = now;
+            requestPersistence();
+          }
         } catch (e) {
           console.warn('could not store saves', e);
+        } finally {
+          writing = false;
         }
       };
-      lastSig = (() => { const f = {}; walk('/Saves', f); return JSON.stringify(f); })();
       setInterval(persistSaves, 4000);
       addEventListener('pagehide', persistSaves);
       document.addEventListener('visibilitychange', () => { if (document.hidden) persistSaves(); });
