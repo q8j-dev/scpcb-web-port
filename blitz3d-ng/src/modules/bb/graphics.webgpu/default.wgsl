@@ -87,10 +87,12 @@ fn fs_main( v : BBPerVertex ) -> @location(0) vec4<f32> {
     var c : vec4<f32>;
     if( RS.texenabled==3 ){
       c = fxaa( v.texcoord ) * vec4<f32>( v.color,1.0 );
+    }else if( RS.texenabled==4 ){
+      c = vec4<f32>( v.color, textureSample( u_tex,u_sampler,v.texcoord ).r );
     }else{
       c = textureSample( u_tex,u_sampler,v.texcoord ) * vec4<f32>( v.color,1.0 );
     }
-    if( RS.texenabled>=2 ){
+    if( RS.texenabled==2 || RS.texenabled==3 ){
       c = vec4<f32>( c.rgb + ditherNoise( v.position.xy ) / 255.0, c.a );
     }
     return c;

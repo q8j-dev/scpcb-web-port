@@ -13,7 +13,7 @@ WebGPUCanvas::WebGPUCanvas( WebGPUContextResources *res,int w,int h,int f ):
 	res(res),width(w),height(h),pixels(0),lock_count(0),font(0),
 	scale_x(1.0f),scale_y(1.0f),origin_x(0),origin_y(0),handle_x(0),handle_y(0),
 	mask(0),pixmap(0),dirty(false),pixmap_stale(false),clear_pending(false),
-	gpu_written(false),is_surface(false),wide_format(false),use_mips(false),mip_levels(1),level0_view(0),mips_dirty(false),hit_valid(false),cube_face(0),cube_mode(0),
+	gpu_written(false),is_surface(false),wide_format(false),use_mips(false),mip_levels(1),level0_view(0),mips_dirty(false),hit_valid(false),font_pass(false),cube_face(0),cube_mode(0),
 	texture(0),twidth(0),theight(0),texture_view(0){
 	flags=f;
 
@@ -452,7 +452,7 @@ void WebGPUCanvas::draw2d( WGPUPrimitiveTopology topology,bool blend,WGPUTexture
 	state.res[0]=(float)width;state.res[1]=(float)height;
 	state.texscale[0]=1.0f;state.texscale[1]=1.0f;
 	state.color[0]=col[0];state.color[1]=col[1];state.color[2]=col[2];
-	state.texenabled=texenabled?1:0;
+	state.texenabled=texenabled?( font_pass?4:1 ):0;
 	state.scale[0]=scale[0];state.scale[1]=scale[1];
 	uint32_t uoffset=res->pushUniformsCached( state );
 
@@ -649,7 +649,7 @@ void WebGPUCanvas::text( int x,int y,const std::string &t ){
 			desc.usage=WGPUTextureUsage_TextureBinding|WGPUTextureUsage_CopyDst;
 			desc.dimension=WGPUTextureDimension_2D;
 			desc.size={ (uint32_t)font->atlas->width,(uint32_t)font->atlas->height,1 };
-			desc.format=WGPUTextureFormat_RGBA8Unorm;
+			desc.format=WGPUTextureFormat_R8Unorm;
 			desc.mipLevelCount=1;
 			desc.sampleCount=1;
 			ft.tex=wgpuDeviceCreateTexture( res->device,&desc );
@@ -658,22 +658,15 @@ void WebGPUCanvas::text( int x,int y,const std::string &t ){
 			ft.height=font->atlas->height;
 		}
 
-		int size=font->atlas->width*font->atlas->height;
-		std::vector<unsigned char> bmp( (size_t)size*4 );
-		for( int i=0;i<size;i++ ){
-			bmp[i*4+0]=bmp[i*4+1]=bmp[i*4+2]=255;
-			bmp[i*4+3]=font->atlas->bits[i];
-		}
-
 		WGPUTexelCopyTextureInfo dst={};
 		dst.texture=ft.tex;
 		dst.aspect=WGPUTextureAspect_All;
 		WGPUTexelCopyBufferLayout layout={};
 		layout.offset=0;
-		layout.bytesPerRow=(uint32_t)font->atlas->width*4;
+		layout.bytesPerRow=(uint32_t)font->atlas->width;
 		layout.rowsPerImage=(uint32_t)font->atlas->height;
 		WGPUExtent3D extent={ (uint32_t)font->atlas->width,(uint32_t)font->atlas->height,1 };
-		wgpuQueueWriteTexture( res->queue,&dst,bmp.data(),bmp.size(),&layout,&extent );
+		wgpuQueueWriteTexture( res->queue,&dst,font->atlas->bits,(size_t)font->atlas->width*font->atlas->height,&layout,&extent );
 	}
 
 	static std::vector<BBWebGPUVertex> verts;
@@ -718,8 +711,10 @@ void WebGPUCanvas::text( int x,int y,const std::string &t ){
 
 	float xywh[4]={ 0.f,0.f,1.f,1.f };
 	float scale[2]={ scale_x,scale_y };
+	font_pass=true;
 	draw2d( WGPUPrimitiveTopology_TriangleList,true,ft.view,res->sampler_linear,
 	        xywh,color,scale,verts.data(),(int)verts.size() );
+	font_pass=false;
 }
 
 void WebGPUCanvas::blit( int x,int y,BBCanvas *s,int src_x,int src_y,int src_w,int src_h,bool solid ){

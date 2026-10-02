@@ -39,6 +39,7 @@ protected:
 
 	std::vector<unsigned char> hit_mask;
 	bool hit_valid;
+	bool font_pass;
 
 	bool buildHitMask();
 	void readPixels( std::vector<unsigned char> &out );
