@@ -2,7 +2,7 @@
 
 SCP: Containment Breach in the browser, using WebAssembly and WebGPU. Play it at https://q8j-dev.github.io/scpcb-web-port/
 
-The game source is unchanged. It is compiled with [blitz3d-ng](https://github.com/blitz3d-ng/blitz3d-ng), which this repo extends with a WebGPU renderer in `blitz3d-ng/src/modules/bb/graphics.webgpu`.
+The game source is unmodified except for an `Include "WebShims.bb"` line at the top of `Main.bb` and the added `WebShims.bb`, which stubs Steam and Discord calls. It is compiled with [blitz3d-ng](https://github.com/blitz3d-ng/blitz3d-ng), which this repo extends with a WebGPU renderer in `blitz3d-ng/src/modules/bb/graphics.webgpu`.
 
 ## Layout
 

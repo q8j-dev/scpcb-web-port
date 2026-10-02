@@ -30,7 +30,11 @@ EXE = ".exe" if SYSTEM == "Windows" else ""
 LLVM_VERSION = "19.1.5"
 LLVM_RELEASE = f"https://github.com/blitz3d-ng/build-llvm/releases/download/v{LLVM_VERSION}"
 LLVM_SOURCE = f"https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-{LLVM_VERSION}.tar.gz"
-CMAKE_COMPAT = "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+LLVM_SHA256 = {
+    f"llvm-{LLVM_VERSION}-macos-14.zip": "a8b88ed0cc02741c214d21d45ca3c6f71ff5dc79106c39de6281549f0e1481d1",
+    f"llvm-{LLVM_VERSION}-win64-msvc17.0.zip": "08e755d7ba3247fe0533c6d9999d3cdee0545c499cfaf1506f7b24f4c6bf9144",
+}
+CMAKE_COMPAT ="-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
 
 STEPS = ["deps", "llvm", "blitzcc", "runtime", "pack", "game"]
 
@@ -136,6 +140,7 @@ def extract_zip_keep_modes(zip_path, dest):
 
 
 UPSTREAM_URL = "https://github.com/blitz3d-ng/blitz3d-ng.git"
+UPSTREAM_COMMIT = "d8d5d1be34dfac328e15d9e9b831d9572cde9d0f"
 GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
 DEPS_MARKERS = [
     os.path.join("zlib", "tree"),
@@ -163,7 +168,10 @@ def step_deps():
 
     with tempfile.TemporaryDirectory() as tmp:
         clone = os.path.join(tmp, "blitz3d-ng")
-        git(["git", "clone", "--depth", "1", UPSTREAM_URL, clone], 120)
+        git(["git", "init", "-q", clone], 60)
+        git(["git", "remote", "add", "origin", UPSTREAM_URL], 60, cwd=clone)
+        git(["git", "fetch", "-q", "--depth", "1", "origin", UPSTREAM_COMMIT], 180, cwd=clone)
+        git(["git", "checkout", "-q", "FETCH_HEAD"], 60, cwd=clone)
 
         cfg = configparser.ConfigParser()
         with open(os.path.join(clone, ".gitmodules"), encoding="utf-8") as f:
@@ -209,6 +217,9 @@ def step_llvm():
         with tempfile.TemporaryDirectory() as tmp:
             zp = os.path.join(tmp, prebuilt)
             download(f"{LLVM_RELEASE}/{prebuilt}", zp)
+            actual = file_digest(zp)
+            if actual != LLVM_SHA256[prebuilt]:
+                sys.exit(f"error: {prebuilt} has SHA-256 {actual}, expected {LLVM_SHA256[prebuilt]}")
             print("  extracting...", flush=True)
             extract_zip_keep_modes(zp, NG)
         return
@@ -488,13 +499,6 @@ def step_game():
     assets_data = os.path.join(STAGE_DIR, "assets.data")
     if not os.path.isfile(assets_js) or not os.path.isfile(assets_data):
         sys.exit("error: packaged assets missing, run: python3 build.py pack")
-
-    main_bb = os.path.join(GAME_DIR, "Main.bb")
-    with open(main_bb, "r", encoding="utf-8", errors="surrogateescape") as f:
-        body = f.read()
-    if not body.startswith('Include "WebShims.bb"'):
-        with open(main_bb, "w", encoding="utf-8", errors="surrogateescape") as f:
-            f.write('Include "WebShims.bb"\n' + body)
 
     deploy = os.path.join(ROOT, "webgame")
     os.makedirs(deploy, exist_ok=True)
