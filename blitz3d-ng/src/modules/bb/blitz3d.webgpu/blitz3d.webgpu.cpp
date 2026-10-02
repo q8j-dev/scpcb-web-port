@@ -117,13 +117,34 @@ public:
 
 	unsigned drawn_marker=0;
 
+	int dirty_v0=0,dirty_v1=0,dirty_t0=0,dirty_t1=0;
+
+	WGPUBuffer wire_buffer=0;
+	unsigned tri_version=1,wire_version=0;
+
 	WebGPUMesh( WebGPUScene *scene,int mv,int mt,int f );
 	~WebGPUMesh();
 
+	WGPUBuffer wireBuffer();
+
 	bool lock( bool all ){
-		if( !verts ) verts=new BBWebGPU3DVertex[max_verts];
-		if( !tris ) tris=new unsigned int[max_tris*3];
+		if( !verts ){
+			verts=new BBWebGPU3DVertex[max_verts]();
+			dirty_v0=max_verts;dirty_v1=0;
+		}
+		if( !tris ){
+			tris=new unsigned int[max_tris*3]();
+			dirty_t0=max_tris;dirty_t1=0;
+		}
 		return true;
+	}
+
+	void writeVertex( int n,const BBWebGPU3DVertex &v ){
+		if( n<0||n>=max_verts||!verts ) return;
+		if( !memcmp( &verts[n],&v,sizeof( v ) ) ) return;
+		verts[n]=v;
+		if( n<dirty_v0 ) dirty_v0=n;
+		if( n+1>dirty_v1 ) dirty_v1=n+1;
 	}
 
 	void unlock();
@@ -140,22 +161,28 @@ public:
 	}
 
 	void setVertex( int n,const float coords[3],const float normal[3],unsigned argb,const float tex_coords[2][2] ){
-		if( n<0||n>=max_verts||!verts ) return;
-		verts[n].coords[0]=coords[0];verts[n].coords[1]=coords[1];verts[n].coords[2]=coords[2];
-		verts[n].normal[0]=normal[0];verts[n].normal[1]=normal[1];verts[n].normal[2]=normal[2];
-		verts[n].tex_coord0[0]=tex_coords[0][0];verts[n].tex_coord0[1]=tex_coords[0][1];
-		verts[n].tex_coord1[0]=tex_coords[1][0];verts[n].tex_coord1[1]=tex_coords[1][1];
-		verts[n].color[0]=(uint8_t)((argb>>16)&255);
-		verts[n].color[1]=(uint8_t)((argb>>8)&255);
-		verts[n].color[2]=(uint8_t)(argb&255);
-		verts[n].color[3]=(uint8_t)((argb>>24)&255);
+		BBWebGPU3DVertex v;
+		v.coords[0]=coords[0];v.coords[1]=coords[1];v.coords[2]=coords[2];
+		v.normal[0]=normal[0];v.normal[1]=normal[1];v.normal[2]=normal[2];
+		v.tex_coord0[0]=tex_coords[0][0];v.tex_coord0[1]=tex_coords[0][1];
+		v.tex_coord1[0]=tex_coords[1][0];v.tex_coord1[1]=tex_coords[1][1];
+		v.color[0]=(uint8_t)((argb>>16)&255);
+		v.color[1]=(uint8_t)((argb>>8)&255);
+		v.color[2]=(uint8_t)(argb&255);
+		v.color[3]=(uint8_t)((argb>>24)&255);
+		writeVertex( n,v );
 	}
 
 	void setTriangle( int n,int v0,int v1,int v2 ){
 		if( n<0||n>=max_tris||!tris ) return;
-		tris[n*3+0]=v2;
-		tris[n*3+1]=v1;
-		tris[n*3+2]=v0;
+		unsigned int *t=tris+n*3;
+		if( t[0]==(unsigned)v2&&t[1]==(unsigned)v1&&t[2]==(unsigned)v0 ) return;
+		t[0]=v2;
+		t[1]=v1;
+		t[2]=v0;
+		++tri_version;
+		if( n<dirty_t0 ) dirty_t0=n;
+		if( n+1>dirty_t1 ) dirty_t1=n+1;
 	}
 };
 
@@ -516,6 +543,8 @@ public:
 			d.layout=bgl_clear;
 			clear_group=wgpuDeviceCreateBindGroup( res->device,&d );
 		}
+
+		prewarmPipelines();
 	}
 
 	WGPUSampler getSampler( int canvas_flags ){
@@ -587,10 +616,33 @@ public:
 	}
 
 	WGPURenderPipeline getScenePipeline( WGPUTextureFormat format ){
+		return getScenePipeline( blend_mode,zmode,flipped_tris,doublesided,wireframe,format );
+	}
+
+	void prewarmPipelines(){
+		WGPUTextureFormat formats[2]={ WGPUTextureFormat_RGBA8Unorm,WGPUTextureFormat_RGB10A2Unorm };
+		for( int f=0;f<2;++f ){
+			for( int blend=BLEND_REPLACE;blend<=BLEND_ADD;++blend ){
+				for( int z=ZMODE_NORMAL;z<=ZMODE_CMPONLY;++z ){
+					for( int flip=0;flip<2;++flip ){
+						for( int dbl=0;dbl<2;++dbl ){
+							getScenePipeline( blend,z,flip!=0,dbl!=0,false,formats[f] );
+						}
+					}
+				}
+			}
+			getClearPipeline( true,true,formats[f] );
+			getClearPipeline( true,false,formats[f] );
+			getClearPipeline( false,true,formats[f] );
+		}
+	}
+
+	WGPURenderPipeline getScenePipeline( int blend_mode,int zmode,bool flipped_tris,bool doublesided,bool wireframe,WGPUTextureFormat format ){
 		uint32_t key=(uint32_t)blend_mode
 			|((uint32_t)zmode<<3)
 			|((flipped_tris?1u:0u)<<5)
 			|((doublesided?1u:0u)<<6)
+			|((wireframe?1u:0u)<<7)
 			|((uint32_t)format<<8);
 		std::map<uint32_t,WGPURenderPipeline>::iterator it=scene_pipelines.find( key );
 		if( it!=scene_pipelines.end() ) return it->second;
@@ -683,10 +735,10 @@ public:
 		desc.vertex.entryPoint=bbStrView( "vs_main" );
 		desc.vertex.bufferCount=1;
 		desc.vertex.buffers=&vbl;
-		desc.primitive.topology=WGPUPrimitiveTopology_TriangleList;
+		desc.primitive.topology=wireframe?WGPUPrimitiveTopology_LineList:WGPUPrimitiveTopology_TriangleList;
 		desc.primitive.stripIndexFormat=WGPUIndexFormat_Undefined;
 		desc.primitive.frontFace=flipped_tris?WGPUFrontFace_CW:WGPUFrontFace_CCW;
-		desc.primitive.cullMode=doublesided?WGPUCullMode_None:WGPUCullMode_Back;
+		desc.primitive.cullMode=( doublesided||wireframe )?WGPUCullMode_None:WGPUCullMode_Back;
 		desc.depthStencil=&ds;
 		desc.multisample.count=1;
 		desc.multisample.mask=0xffffffff;
@@ -1214,6 +1266,16 @@ public:
 		if( !mesh||!mesh->vertex_buffer||!mesh->index_buffer||tri_cnt<=0 ) return;
 		if( !target ) return;
 
+		WGPUBuffer index_buffer=mesh->index_buffer;
+		bool index16=mesh->index16;
+		int index_first=first_tri*3,index_count=tri_cnt*3;
+		if( wireframe ){
+			index_buffer=mesh->wireBuffer();
+			if( !index_buffer ) return;
+			index_first=first_tri*6;
+			index_count=tri_cnt*6;
+		}
+
 		for( int attempt=0;attempt<4;++attempt ){
 			if( frame_dirty ){
 				updateLightsEye();
@@ -1259,11 +1321,11 @@ public:
 			wgpuRenderPassEncoderSetVertexBuffer( p,0,mesh->vertex_buffer,0,WGPU_WHOLE_SIZE );
 			bound_vertex_buffer=mesh->vertex_buffer;
 		}
-		if( mesh->index_buffer!=bound_index_buffer ){
-			wgpuRenderPassEncoderSetIndexBuffer( p,mesh->index_buffer,mesh->index16?WGPUIndexFormat_Uint16:WGPUIndexFormat_Uint32,0,WGPU_WHOLE_SIZE );
-			bound_index_buffer=mesh->index_buffer;
+		if( index_buffer!=bound_index_buffer ){
+			wgpuRenderPassEncoderSetIndexBuffer( p,index_buffer,index16?WGPUIndexFormat_Uint16:WGPUIndexFormat_Uint32,0,WGPU_WHOLE_SIZE );
+			bound_index_buffer=index_buffer;
 		}
-		wgpuRenderPassEncoderDrawIndexed( p,(uint32_t)tri_cnt*3,1,(uint32_t)first_tri*3,first_vert,0 );
+		wgpuRenderPassEncoderDrawIndexed( p,(uint32_t)index_count,1,(uint32_t)index_first,first_vert,0 );
 
 		mesh->drawn_marker=submit_marker;
 		tris_drawn+=tri_cnt;
@@ -1296,6 +1358,9 @@ public:
 
 WebGPUMesh::WebGPUMesh( WebGPUScene *scene,int mv,int mt,int f ):
 scene(scene),max_verts(mv>0?mv:1),max_tris(mt>0?mt:1),flags(f){
+	dirty_v0=max_verts;
+	dirty_t0=max_tris;
+
 	WGPUBufferDescriptor vd={};
 	vd.label=bbStrView( "bb.3d.mesh.verts" );
 	vd.usage=WGPUBufferUsage_Vertex|WGPUBufferUsage_CopyDst;
@@ -1314,28 +1379,82 @@ WebGPUMesh::~WebGPUMesh(){
 	++g_mesh_generation;
 	if( vertex_buffer ){ wgpuBufferRelease( vertex_buffer );vertex_buffer=0; }
 	if( index_buffer ){ wgpuBufferRelease( index_buffer );index_buffer=0; }
+	if( wire_buffer ){ wgpuBufferRelease( wire_buffer );wire_buffer=0; }
 	delete[] verts;
 	delete[] tris;
 }
 
-void WebGPUMesh::unlock(){
-	if( !verts||!tris ) return;
+WGPUBuffer WebGPUMesh::wireBuffer(){
+	if( !tris ) return 0;
+	if( wire_buffer&&wire_version==tri_version ) return wire_buffer;
 
 	if( drawn_marker==scene->submit_marker ){
 		scene->flushAll();
 	}
 
-	wgpuQueueWriteBuffer( scene->res->queue,vertex_buffer,0,verts,(size_t)max_verts*sizeof( BBWebGPU3DVertex ) );
-	if( index16 ){
-		static std::vector<uint16_t> narrow;
-		size_t count=(size_t)max_tris*3;
-		narrow.resize( (count+1)&~(size_t)1 );
-		for( size_t i=0;i<count;i++ ) narrow[i]=(uint16_t)tris[i];
-		if( count&1 ) narrow[count]=0;
-		wgpuQueueWriteBuffer( scene->res->queue,index_buffer,0,narrow.data(),narrow.size()*sizeof( uint16_t ) );
-	}else{
-		wgpuQueueWriteBuffer( scene->res->queue,index_buffer,0,tris,(size_t)max_tris*3*sizeof( unsigned int ) );
+	size_t count=(size_t)max_tris*6;
+	size_t stride=index16?sizeof( uint16_t ):sizeof( unsigned int );
+	if( !wire_buffer ){
+		WGPUBufferDescriptor bd={};
+		bd.label=bbStrView( "bb.3d.mesh.wire" );
+		bd.usage=WGPUBufferUsage_Index|WGPUBufferUsage_CopyDst;
+		bd.size=count*stride;
+		wire_buffer=wgpuDeviceCreateBuffer( scene->res->device,&bd );
 	}
+
+	std::vector<unsigned int> edges( count );
+	for( int t=0;t<max_tris;t++ ){
+		const unsigned int *tri=tris+t*3;
+		edges[t*6+0]=tri[0];edges[t*6+1]=tri[1];
+		edges[t*6+2]=tri[1];edges[t*6+3]=tri[2];
+		edges[t*6+4]=tri[2];edges[t*6+5]=tri[0];
+	}
+	if( index16 ){
+		std::vector<uint16_t> narrow( count );
+		for( size_t i=0;i<count;i++ ) narrow[i]=(uint16_t)edges[i];
+		wgpuQueueWriteBuffer( scene->res->queue,wire_buffer,0,narrow.data(),count*stride );
+	}else{
+		wgpuQueueWriteBuffer( scene->res->queue,wire_buffer,0,edges.data(),count*stride );
+	}
+	wire_version=tri_version;
+	return wire_buffer;
+}
+
+void WebGPUMesh::unlock(){
+	if( !verts||!tris ) return;
+
+	bool verts_dirty=dirty_v1>dirty_v0;
+	bool tris_dirty=dirty_t1>dirty_t0;
+	if( !verts_dirty&&!tris_dirty ) return;
+
+	if( drawn_marker==scene->submit_marker ){
+		scene->flushAll();
+	}
+
+	if( verts_dirty ){
+		wgpuQueueWriteBuffer( scene->res->queue,vertex_buffer,(uint64_t)dirty_v0*sizeof( BBWebGPU3DVertex ),
+		                      verts+dirty_v0,(size_t)( dirty_v1-dirty_v0 )*sizeof( BBWebGPU3DVertex ) );
+	}
+
+	if( tris_dirty ){
+		size_t total=(size_t)max_tris*3;
+		size_t first=(size_t)dirty_t0*3,last=(size_t)dirty_t1*3;
+		if( index16 ){
+			static std::vector<uint16_t> narrow;
+			first&=~(size_t)1;
+			last=( last+1 )&~(size_t)1;
+			narrow.resize( last-first );
+			for( size_t i=first;i<last;i++ ) narrow[i-first]=i<total?(uint16_t)tris[i]:0;
+			wgpuQueueWriteBuffer( scene->res->queue,index_buffer,(uint64_t)first*sizeof( uint16_t ),
+			                      narrow.data(),narrow.size()*sizeof( uint16_t ) );
+		}else{
+			wgpuQueueWriteBuffer( scene->res->queue,index_buffer,(uint64_t)first*sizeof( unsigned int ),
+			                      tris+first,( last-first )*sizeof( unsigned int ) );
+		}
+	}
+
+	dirty_v0=max_verts;dirty_v1=0;
+	dirty_t0=max_tris;dirty_t1=0;
 }
 
 
