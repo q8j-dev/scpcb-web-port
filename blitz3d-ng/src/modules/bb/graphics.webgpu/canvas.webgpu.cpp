@@ -372,6 +372,27 @@ void WebGPUCanvas::downloadData(){
 	}
 }
 
+void WebGPUCanvas::uploadRGBA( const unsigned char *rgba,int w,int h ){
+	if( !res->device || is_surface || wide_format || w!=width || h!=height ) return;
+
+	ensureTexture();
+	res->flush();
+
+	WGPUTexelCopyTextureInfo dst={};
+	dst.texture=texture;
+	dst.aspect=WGPUTextureAspect_All;
+	WGPUTexelCopyBufferLayout layout={};
+	layout.bytesPerRow=(uint32_t)w*4;
+	layout.rowsPerImage=(uint32_t)h;
+	WGPUExtent3D extent={ (uint32_t)w,(uint32_t)h,1 };
+	wgpuQueueWriteTexture( res->queue,&dst,rgba,(size_t)w*h*4,&layout,&extent );
+	if( mip_levels>1 ) res->generateMips( texture,mip_levels );
+
+	dirty=false;
+	pixmap_stale=false;
+	hit_valid=false;
+}
+
 void WebGPUCanvas::setPixmap( BBPixmap *pm ){
 	if( pixmap==pm ) return;
 

@@ -68,6 +68,7 @@ public:
 	WGPUTextureView texture_view;
 
 	void setPixmap( BBPixmap *pm );
+	void uploadRGBA( const unsigned char *rgba,int w,int h );
 
 	void resize( int w,int h,float d );
 

@@ -104,22 +104,16 @@ public:
 			if( vid_w<=0 || vid_h<=0 ){ failed=true;return false; }
 
 			frame_canvas=(WebGPUCanvas*)gfx->createCanvas( vid_w,vid_h,0 );
+			frame.resize( (size_t)vid_w*vid_h*4 );
 			bbgpu_movie_play( handle );
 		}
 
-		BBPixmap *pm=d_new BBPixmap;
-		pm->format=PF_RGBA;
-		pm->width=vid_w;pm->height=vid_h;pm->depth=32;pm->bpp=4;pm->pitch=vid_w*4;
-		pm->trans=false;
-		pm->bits=new unsigned char[ (size_t)vid_w*vid_h*4 ];
-		if( bbgpu_movie_grab( handle,pm->bits,vid_w,vid_h ) ){
-			frame_canvas->setPixmap( pm );
+		if( bbgpu_movie_grab( handle,frame.data(),vid_w,vid_h ) ){
+			frame_canvas->uploadRGBA( frame.data(),vid_w,vid_h );
 
 			if( w<0 ) w=vid_w;
 			if( h<0 ) h=vid_h;
 			((WebGPUCanvas*)dest)->blitScaled( x,y,w,h,frame_canvas,0,0,vid_w,vid_h,true );
-		}else{
-			delete pm;
 		}
 
 		return bbgpu_movie_ended( handle )==0;
@@ -139,6 +133,7 @@ private:
 	int vid_w,vid_h;
 	bool failed;
 	WebGPUCanvas *frame_canvas;
+	std::vector<unsigned char> frame;
 };
 
 
