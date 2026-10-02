@@ -974,7 +974,7 @@ void WebGPUGraphics::present(){
 
 	WGPURenderPassEncoder p=wgpuCommandEncoderBeginRenderPass( res.encoder,&desc );
 	wgpuRenderPassEncoderSetPipeline( p,res.getPipeline( WGPUPrimitiveTopology_TriangleList,false,res.surface_format ) );
-	wgpuRenderPassEncoderSetBindGroup( p,0,res.getBindGroup( src,res.sampler_nearest ),1,&uoffset );
+	wgpuRenderPassEncoderSetBindGroup( p,0,res.getBindGroup( src,res.antialias?res.sampler_linear:res.sampler_nearest ),1,&uoffset );
 	wgpuRenderPassEncoderSetVertexBuffer( p,0,res.vertex_buffer,voffset,6*sizeof( BBWebGPUVertex ) );
 	wgpuRenderPassEncoderDraw( p,6,1,0,0 );
 	wgpuRenderPassEncoderEnd( p );

@@ -84,9 +84,11 @@ fn fxaa( uv : vec2<f32> ) -> vec4<f32> {
 @fragment
 fn fs_main( v : BBPerVertex ) -> @location(0) vec4<f32> {
   if( RS.texenabled>=1 ){
-    var c = textureSample( u_tex,u_sampler,v.texcoord ) * vec4<f32>( v.color,1.0 );
+    var c : vec4<f32>;
     if( RS.texenabled==3 ){
       c = fxaa( v.texcoord ) * vec4<f32>( v.color,1.0 );
+    }else{
+      c = textureSample( u_tex,u_sampler,v.texcoord ) * vec4<f32>( v.color,1.0 );
     }
     if( RS.texenabled>=2 ){
       c = vec4<f32>( c.rgb + ditherNoise( v.position.xy ) / 255.0, c.a );

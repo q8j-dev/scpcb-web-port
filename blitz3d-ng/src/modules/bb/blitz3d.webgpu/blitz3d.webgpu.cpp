@@ -542,7 +542,7 @@ public:
 		d.mipmapFilter=mipmap?WGPUMipmapFilterMode_Linear:WGPUMipmapFilterMode_Nearest;
 		d.lodMinClamp=0.f;
 		d.lodMaxClamp=32.f;
-		d.maxAnisotropy=1;
+		d.maxAnisotropy=( mipmap && !no_filter )?8:1;
 
 		WGPUSampler s=wgpuDeviceCreateSampler( res->device,&d );
 		samplers[key]=s;
